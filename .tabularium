@@ -1,0 +1,77 @@
+{
+  "$schema": "https://registry.tabularis.dev/manifest.schema.json?kind=driver",
+  "name": "bigquery",
+  "version": "0.1.0",
+  "description": "Google BigQuery driver for Tabularis with GoogleSQL, datasets, views, routines, editable results and cost controls.",
+  "kind": "driver",
+  "engine": "bigquery",
+  "paradigms": ["relational", "columnar"],
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/TabularisDB/tabularis-bigquery-plugin",
+  "support": {
+    "issues_url": "https://github.com/TabularisDB/tabularis-bigquery-plugin/issues"
+  },
+  "default_port": 443,
+  "default_username": "",
+  "executable": "bigquery-plugin",
+  "color": "#4285F4",
+  "icon": "cloud",
+  "ui_extensions": [
+    {
+      "slot": "connection-modal.extra_fields",
+      "module": "ui/connection-fields.js",
+      "order": 10,
+      "driver": "bigquery"
+    }
+  ],
+  "capabilities": {
+    "schemas": true,
+    "views": true,
+    "materialized_views": true,
+    "routines": true,
+    "routine_management": false,
+    "triggers": false,
+    "file_based": false,
+    "folder_based": false,
+    "no_connection_required": false,
+    "connection_string": false,
+    "identifier_quote": "`",
+    "sql_dialect": "generic",
+    "alter_primary_key": true,
+    "alter_column": true,
+    "create_foreign_keys": true,
+    "manage_tables": true,
+    "supports_ssl": false,
+    "explain": true,
+    "readonly": false,
+    "serial_type": "",
+    "auto_increment_keyword": "",
+    "inline_pk": false
+  },
+  "type_mappings": {
+    "INTEGER": "INT64",
+    "REAL": "FLOAT64",
+    "BOOLEAN": "BOOL",
+    "DATETIME": "DATETIME",
+    "TEXT": "STRING"
+  },
+  "data_types": [
+    {"name": "INT64", "category": "numeric", "requires_length": false, "requires_precision": false},
+    {"name": "FLOAT64", "category": "numeric", "requires_length": false, "requires_precision": false},
+    {"name": "NUMERIC", "category": "numeric", "requires_length": false, "requires_precision": true},
+    {"name": "BIGNUMERIC", "category": "numeric", "requires_length": false, "requires_precision": true},
+    {"name": "STRING", "category": "string", "requires_length": false, "requires_precision": false},
+    {"name": "BYTES", "category": "binary", "requires_length": false, "requires_precision": false},
+    {"name": "BOOL", "category": "other", "requires_length": false, "requires_precision": false},
+    {"name": "DATE", "category": "date", "requires_length": false, "requires_precision": false},
+    {"name": "TIME", "category": "date", "requires_length": false, "requires_precision": false},
+    {"name": "DATETIME", "category": "date", "requires_length": false, "requires_precision": false},
+    {"name": "TIMESTAMP", "category": "date", "requires_length": false, "requires_precision": false},
+    {"name": "INTERVAL", "category": "date", "requires_length": false, "requires_precision": false},
+    {"name": "JSON", "category": "json", "requires_length": false, "requires_precision": false},
+    {"name": "GEOGRAPHY", "category": "spatial", "requires_length": false, "requires_precision": false},
+    {"name": "ARRAY", "category": "other", "requires_length": false, "requires_precision": false},
+    {"name": "STRUCT", "category": "other", "requires_length": false, "requires_precision": false},
+    {"name": "RANGE", "category": "other", "requires_length": false, "requires_precision": false}
+  ]
+}
