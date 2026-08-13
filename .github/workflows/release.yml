@@ -6,8 +6,30 @@ on:
       - "v*"
 
 jobs:
+  ui:
+    name: UI bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm --dir ui install --frozen-lockfile
+      - run: pnpm --dir ui typecheck
+      - run: pnpm --dir ui build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ui-dist
+          path: ui/dist/
+
   build:
     name: ${{ matrix.platform-label }}
+    needs: ui
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -48,22 +70,26 @@ jobs:
       - name: Build
         if: ${{ !matrix.cross }}
         run: cargo build --release --target ${{ matrix.target }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: ui-dist
+          path: ui/dist/
       - name: Package on Unix
         if: runner.os != 'Windows'
         run: |
-          mkdir -p staging/ui
+          mkdir -p staging/ui/dist
           cp target/${{ matrix.target }}/release/bigquery-plugin${{ matrix.binary-suffix }} staging/
           cp .tabularium staging/
-          cp ui/connection-fields.js staging/ui/
+          cp ui/dist/*.js staging/ui/dist/
           (cd staging && zip -r ../bigquery-plugin-${{ matrix.platform-label }}.zip .)
       - name: Package on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "staging\ui" | Out-Null
+          New-Item -ItemType Directory -Force -Path "staging\ui\dist" | Out-Null
           Copy-Item "target\${{ matrix.target }}\release\bigquery-plugin${{ matrix.binary-suffix }}" staging
           Copy-Item ".tabularium" staging
-          Copy-Item "ui\connection-fields.js" "staging\ui"
+          Copy-Item "ui\dist\*.js" "staging\ui\dist"
           Compress-Archive -Path "staging\*" -DestinationPath "bigquery-plugin-${{ matrix.platform-label }}.zip"
       - name: Smoke test on Unix
         if: runner.os != 'Windows' && !matrix.cross
@@ -100,4 +126,3 @@ jobs:
           files: |
             artifacts/*.zip
             .tabularium
-

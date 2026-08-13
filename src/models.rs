@@ -74,6 +74,15 @@ impl ConnectionParams {
         self.extra_value("auth_method").unwrap_or("adc")
     }
 
+    pub fn credential(&self) -> Option<&str> {
+        self.extra_value("credential").or_else(|| {
+            self.password
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+    }
+
     pub fn location(&self) -> Option<&str> {
         self.extra_value("location")
     }
@@ -130,5 +139,27 @@ mod tests {
     fn clamps_timeout() {
         let value = json!({"database": "p", "extra": {"query_timeout_seconds": "2"}});
         assert_eq!(ConnectionParams::from_value(&value).timeout_seconds(), 30);
+    }
+
+    #[test]
+    fn secure_plugin_credential_takes_priority_over_legacy_password() {
+        let value = json!({
+            "database": "p",
+            "password": "legacy",
+            "extra": {"credential": "secure"}
+        });
+        assert_eq!(
+            ConnectionParams::from_value(&value).credential(),
+            Some("secure")
+        );
+    }
+
+    #[test]
+    fn legacy_password_remains_a_credential_fallback() {
+        let value = json!({"database": "p", "password": "legacy"});
+        assert_eq!(
+            ConnectionParams::from_value(&value).credential(),
+            Some("legacy")
+        );
     }
 }

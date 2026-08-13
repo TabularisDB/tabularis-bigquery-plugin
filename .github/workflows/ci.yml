@@ -7,6 +7,23 @@ on:
     branches: [main]
 
 jobs:
+  ui:
+    name: UI typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm --dir ui install --frozen-lockfile
+      - run: pnpm --dir ui typecheck
+      - run: pnpm --dir ui build
+
   test:
     name: Test and lint
     runs-on: ubuntu-latest
@@ -18,7 +35,6 @@ jobs:
       - run: cargo test --all-targets
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo fmt --all -- --check
-      - run: node --check ui/connection-fields.js
 
   validate-manifest:
     name: Validate .tabularium manifest
@@ -35,4 +51,3 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-

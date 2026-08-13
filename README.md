@@ -24,15 +24,12 @@ A native Google BigQuery driver for [Tabularis](https://github.com/TabularisDB/t
 
 ## Connection setup
 
-Tabularis currently provides common database fields plus a plugin extension area. The BigQuery plugin maps them as follows:
+On a compatible Tabularis host, the BigQuery plugin hides unused common fields and maps the connection form as follows:
 
 | Tabularis field | BigQuery meaning |
 | --- | --- |
-| Database | GCP Project ID used for jobs and billing |
-| Password | Service account JSON/path or access token, depending on Authentication |
-| Host | Ignored |
-| Port | Ignored |
-| Username | Ignored |
+| GCP Project ID | Project used for jobs and billing |
+| Credential | Service account JSON/path, authorized user JSON/path, or access token |
 
 The BigQuery section in the connection form adds:
 
@@ -41,13 +38,13 @@ The BigQuery section in the connection form adds:
 - **Query timeout**: 30 to 3600 seconds, default 300
 - **Maximum bytes billed**: optional per-query cost guard
 
-Enable Tabularis keychain storage when the Password field contains a service account key or access token.
+The Credential field is plugin-owned. Tabularis stores its value in the OS keychain and never writes it to `connections.json`. Existing connections that used the Password field remain supported and do not require migration.
 
-Native secure plugin-owned fields and hiding unused common fields are tracked upstream in [Tabularis issue #623](https://github.com/TabularisDB/tabularis/issues/623).
+Older Tabularis hosts ignore the field presentation overrides. On those hosts, continue to use Password for credentials and enable keychain storage.
 
 ### Application Default Credentials
 
-Leave Password empty. The plugin tries the standard Google credential chain:
+Leave Credential empty. The plugin tries the standard Google credential chain:
 
 1. `GOOGLE_APPLICATION_CREDENTIALS`
 2. Credentials created by `gcloud auth application-default login`
@@ -56,15 +53,15 @@ Leave Password empty. The plugin tries the standard Google credential chain:
 
 ### Service account
 
-Select **Service account JSON** and put either the credential file path or the complete JSON document in Password. A file path is preferred because Tabularis never needs to persist the private key itself.
+Select **Service account JSON** and put either the credential file path or the complete JSON document in Credential.
 
 ### OAuth access token
 
-Select **OAuth access token** and put a current bearer token in Password. Direct access tokens expire and the plugin cannot refresh them. ADC is recommended for interactive user credentials.
+Select **OAuth access token** and put a current bearer token in Credential. Direct access tokens expire and the plugin cannot refresh them. ADC is recommended for interactive user credentials.
 
 ### OAuth authorized user
 
-Select **OAuth authorized user JSON** and put either an `authorized_user` credential file path or the complete JSON document in Password. The document must contain `client_id`, `client_secret` and `refresh_token`. The plugin exchanges the refresh token only with Google's fixed OAuth token endpoint and caches short-lived access tokens.
+Select **OAuth authorized user JSON** and put either an `authorized_user` credential file path or the complete JSON document in Credential. The document must contain `client_id`, `client_secret` and `refresh_token`. The plugin exchanges the refresh token only with Google's fixed OAuth token endpoint and caches short-lived access tokens.
 
 ## Required Google Cloud permissions
 
@@ -79,7 +76,8 @@ bigquery/
 ├── .tabularium
 ├── bigquery-plugin
 └── ui/
-    └── connection-fields.js
+    └── dist/
+        └── connection-fields.js
 ```
 
 Use `bigquery-plugin.exe` on Windows.
@@ -92,14 +90,16 @@ Use `bigquery-plugin.exe` on Windows.
 
 ## Build and test
 
-Rust stable is required.
+Rust stable, Node.js 20 and pnpm 9 are required. The UI extension is authored in React and TypeScript under `ui/src`; Vite produces the IIFE bundle loaded by Tabularis.
 
 ```bash
+pnpm --dir ui install --frozen-lockfile
+pnpm --dir ui typecheck
+pnpm --dir ui build
 cargo build
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
-node --check ui/connection-fields.js
 ```
 
 Validate the release manifest with Tabularium:

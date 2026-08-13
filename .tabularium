@@ -16,10 +16,20 @@
   "executable": "bigquery-plugin",
   "color": "#4285F4",
   "icon": "cloud",
+  "connection_fields": {
+    "host": {"hidden": true},
+    "port": {"hidden": true},
+    "username": {"hidden": true},
+    "password": {"hidden": true},
+    "database": {
+      "label": "GCP Project ID",
+      "placeholder": "billing-project"
+    }
+  },
   "ui_extensions": [
     {
       "slot": "connection-modal.extra_fields",
-      "module": "ui/connection-fields.js",
+      "module": "ui/dist/connection-fields.js",
       "order": 10,
       "driver": "bigquery"
     }
