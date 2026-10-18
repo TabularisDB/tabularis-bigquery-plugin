@@ -57,7 +57,7 @@ jobs:
             sleep 2
           done
           exit 1
-      - run: cargo test --test emulator
+      - run: cargo test --test emulator --test emulator_metadata
         env:
           BIGQUERY_EMULATOR_HOST: localhost:9050
 
