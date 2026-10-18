@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 
 const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldSchema {
     pub name: String,
@@ -19,6 +19,20 @@ pub struct FieldSchema {
     pub fields: Vec<FieldSchema>,
     #[serde(default)]
     pub default_value_expression: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_element_type: Option<RangeElementType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct RangeElementType {
+    #[serde(rename = "type")]
+    pub element_type: String,
 }
 
 impl FieldSchema {
@@ -246,9 +260,9 @@ mod tests {
                 mode: None,
                 description: None,
                 fields: vec![],
-                default_value_expression: None,
+                ..Default::default()
             }],
-            default_value_expression: None,
+            ..Default::default()
         };
         assert_eq!(field.display_type(), "ARRAY<STRUCT<amount NUMERIC>>");
     }
