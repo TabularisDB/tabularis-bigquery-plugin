@@ -3,8 +3,17 @@
   "name": "bigquery",
   "version": "0.1.0",
   "description": "Google BigQuery driver for Tabularis with GoogleSQL, datasets, views, routines, editable results and cost controls.",
+  "min_runtime_version": "0.23.0",
   "kind": "driver",
   "engine": "bigquery",
+  "explain_parsers": [
+    {
+      "engine": "bigquery",
+      "format": "bigquery-job-json",
+      "label": "BigQuery job plan (JSON)",
+      "module": "explain/dist/index.iife.js"
+    }
+  ],
   "paradigms": ["relational", "columnar"],
   "license": "Apache-2.0",
   "homepage": "https://github.com/TabularisDB/tabularis-bigquery-plugin",

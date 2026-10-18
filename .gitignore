@@ -5,3 +5,5 @@ ui/dist/
 .DS_Store
 .idea/
 .vscode/
+explain/node_modules/
+explain/dist/
