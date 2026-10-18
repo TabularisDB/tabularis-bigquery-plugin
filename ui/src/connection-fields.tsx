@@ -220,9 +220,47 @@ const BigQueryConnectionFields = defineSlot(
           default) or raise that setting too.
         </p>
 
-        <details style={styles.details} open={Boolean(apiEndpoint || extra.impersonate_service_account)}>
+        <details
+          style={styles.details}
+          open={Boolean(
+            apiEndpoint ||
+              extra.impersonate_service_account ||
+              extra.billing_project ||
+              extra.additional_projects,
+          )}
+        >
           <summary style={styles.summary}>Advanced options</summary>
           <div style={styles.container}>
+            <div style={styles.grid}>
+              <Field label="Billing project">
+                <input
+                  value={extra.billing_project || ""}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setExtraField("billing_project", event.target.value)
+                  }
+                  placeholder="Defaults to the project ID"
+                  autoComplete="off"
+                  spellCheck={false}
+                  style={styles.input}
+                />
+              </Field>
+              <Field label="Additional projects">
+                <input
+                  value={extra.additional_projects || ""}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setExtraField("additional_projects", event.target.value)
+                  }
+                  placeholder="bigquery-public-data, other-project"
+                  autoComplete="off"
+                  spellCheck={false}
+                  style={styles.input}
+                />
+              </Field>
+            </div>
+            <p style={styles.help}>
+              Optional. Jobs run and are billed in the billing project. Additional projects are
+              comma-separated and browsed alongside the project ID.
+            </p>
             <Field label="API endpoint">
               <input
                 value={apiEndpoint}
