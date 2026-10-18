@@ -378,15 +378,7 @@ fn column_sql(column: &ColumnDefinition, allow_required: bool) -> Result<String,
         return Err(format!("Column '{}' needs a data type", column.name));
     }
     let mut output = format!("{} {data_type}", quote_identifier(&column.name));
-    if let Some(default) = column
-        .default_value
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        output.push_str(" DEFAULT ");
-        output.push_str(default);
-    }
+    // GoogleSQL column_schema: name type [NOT NULL] [DEFAULT expr] [OPTIONS(...)]
     if !column.is_nullable {
         if !allow_required {
             return Err(format!(
@@ -395,6 +387,15 @@ fn column_sql(column: &ColumnDefinition, allow_required: bool) -> Result<String,
             ));
         }
         output.push_str(" NOT NULL");
+    }
+    if let Some(default) = column
+        .default_value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        output.push_str(" DEFAULT ");
+        output.push_str(default);
     }
     if let Some(description) = column.comment.as_deref().filter(|value| !value.is_empty()) {
         output.push_str(&format!(
@@ -646,6 +647,20 @@ mod tests {
         let mut serial = column("id", "INT64", true);
         serial.is_auto_increment = true;
         assert!(create_table_sql(PATH, &[serial], &TableOptions::default()).is_err());
+    }
+
+    #[test]
+    fn required_defaulted_column_puts_not_null_before_default() {
+        let mut status = column("status", "STRING", false);
+        status.is_nullable = false;
+        status.default_value = Some("'new'".into());
+        status.comment = Some("State".into());
+        let sql = create_table_sql(PATH, &[status], &TableOptions::default()).unwrap();
+        assert_eq!(
+            sql,
+            "CREATE TABLE `my-proj`.`d`.`t` (\n  \
+             `status` STRING NOT NULL DEFAULT 'new' OPTIONS(description = 'State')\n)"
+        );
     }
 
     #[test]

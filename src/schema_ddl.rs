@@ -265,6 +265,10 @@ pub fn column_definition(field: &FieldSchema) -> String {
         quote_identifier(&field.name),
         field_type_sql(field, true)
     );
+    // GoogleSQL column_schema: name type [NOT NULL] [DEFAULT expr] [OPTIONS(...)]
+    if is_required(field) {
+        column.push_str(" NOT NULL");
+    }
     if let Some(default) = field
         .default_value_expression
         .as_deref()
@@ -272,9 +276,6 @@ pub fn column_definition(field: &FieldSchema) -> String {
     {
         column.push_str(" DEFAULT ");
         column.push_str(default.trim());
-    }
-    if is_required(field) {
-        column.push_str(" NOT NULL");
     }
     if let Some(description) = field.description.as_deref() {
         column.push_str(&format!(
@@ -589,6 +590,22 @@ mod tests {
                 }]
             }
         })
+    }
+
+    #[test]
+    fn column_definition_puts_not_null_before_default() {
+        let field: FieldSchema = serde_json::from_value(json!({
+            "name": "status",
+            "type": "STRING",
+            "mode": "REQUIRED",
+            "defaultValueExpression": "'new'",
+            "description": "State"
+        }))
+        .unwrap();
+        assert_eq!(
+            column_definition(&field),
+            "`status` STRING NOT NULL DEFAULT 'new' OPTIONS(description = 'State')"
+        );
     }
 
     #[test]
