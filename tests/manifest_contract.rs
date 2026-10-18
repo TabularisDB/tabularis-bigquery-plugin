@@ -51,6 +51,7 @@ fn manifest_declares_bigquery_feature_coverage() {
     assert_eq!(syntax["script_blocks"], true);
     assert_eq!(syntax["string_escape"], "backslash");
     assert_eq!(syntax["like_escape"], false);
+    assert_eq!(syntax["boolean_literals"], "keywords");
     assert_eq!(syntax["formatter"], "bigquery");
     for (generic, native) in [
         ("JSON", "JSON"),
