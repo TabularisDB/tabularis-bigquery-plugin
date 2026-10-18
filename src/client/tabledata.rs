@@ -24,7 +24,7 @@ impl BigQueryClient {
         page: u32,
         page_size: u32,
     ) -> Result<Option<QueryOutput>, CallError> {
-        let project = target.project.as_deref().unwrap_or(&self.project_id);
+        let project = target.project.as_deref().unwrap_or(self.data_project());
         let table = self
             .get(
                 &[

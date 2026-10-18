@@ -140,6 +140,20 @@ fn page_token_of(response: &Value) -> Option<String> {
 }
 
 impl BigQueryClient {
+    // Project selection for jobs and unqualified names lives only in these two
+    // helpers, so a separate billing project can be wired in here alone.
+
+    /// Project that runs and bills query jobs.
+    fn job_project(&self) -> &str {
+        &self.project_id
+    }
+
+    /// Project of unqualified table names (`defaultDataset.projectId`) and of
+    /// table browsing.
+    pub(crate) fn data_project(&self) -> &str {
+        &self.project_id
+    }
+
     /// Run a statement and return one page of its result.
     pub async fn run_query(
         &self,
@@ -380,11 +394,12 @@ impl BigQueryClient {
             body["maximumBytesBilled"] = Value::String(maximum.clone());
         }
         if let Some(dataset) = request.dataset.filter(|value| !value.is_empty()) {
-            body["defaultDataset"] = json!({"projectId": self.project_id, "datasetId": dataset});
+            body["defaultDataset"] =
+                json!({"projectId": self.data_project(), "datasetId": dataset});
         }
 
         let response = self
-            .post(&["projects", &self.project_id, "queries"], &[], &body)
+            .post(&["projects", self.job_project(), "queries"], &[], &body)
             .await
             .map_err(String::from)?;
         let job_id = response
@@ -395,7 +410,7 @@ impl BigQueryClient {
             project: response
                 .pointer("/jobReference/projectId")
                 .and_then(Value::as_str)
-                .unwrap_or(&self.project_id)
+                .unwrap_or(self.job_project())
                 .to_string(),
             job_id: job_id.to_string(),
             location: response
@@ -617,7 +632,7 @@ impl BigQueryClient {
         if let Some(location) = location.or(self.location.as_deref()) {
             body["location"] = Value::String(location.to_string());
         }
-        self.post(&["projects", &self.project_id, "queries"], &[], &body)
+        self.post(&["projects", self.job_project(), "queries"], &[], &body)
             .await
             .map(|_| ())
             .map_err(String::from)
@@ -632,7 +647,8 @@ impl BigQueryClient {
     ) -> Result<Value, String> {
         let mut query = json!({"query": sql, "useLegacySql": false});
         if let Some(dataset) = dataset.filter(|value| !value.is_empty()) {
-            query["defaultDataset"] = json!({"projectId": self.project_id, "datasetId": dataset});
+            query["defaultDataset"] =
+                json!({"projectId": self.data_project(), "datasetId": dataset});
         }
         if let Some(maximum) = &self.max_bytes_billed {
             query["maximumBytesBilled"] = Value::String(maximum.clone());
@@ -644,7 +660,7 @@ impl BigQueryClient {
                 location = state.location.clone().or(location);
             }
         }
-        let mut reference = json!({"projectId": self.project_id});
+        let mut reference = json!({"projectId": self.job_project()});
         if let Some(location) = location {
             reference["location"] = Value::String(location);
         }
@@ -652,7 +668,7 @@ impl BigQueryClient {
             "jobReference": reference,
             "configuration": {"dryRun": true, "query": query, "labels": {"client": "tabularis"}}
         });
-        self.post(&["projects", &self.project_id, "jobs"], &[], &body)
+        self.post(&["projects", self.job_project(), "jobs"], &[], &body)
             .await
             .map_err(String::from)
     }

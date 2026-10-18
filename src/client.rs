@@ -209,6 +209,10 @@ fn cache_key(params: &ConnectionParams) -> String {
         timeout.as_str(),
         params.api_endpoint().unwrap_or_default(),
         params.impersonate_service_account().unwrap_or_default(),
+        params.extra_value("billing_project").unwrap_or_default(),
+        params
+            .extra_value("additional_projects")
+            .unwrap_or_default(),
     ] {
         hasher.update(part);
         hasher.update([0]);
@@ -274,6 +278,8 @@ mod tests {
                 "sa@p.iam.gserviceaccount.com",
             ),
             ("auth_method", "access_token"),
+            ("billing_project", "billing"),
+            ("additional_projects", "bigquery-public-data"),
         ] {
             let mut extra = json!({"credential": "a"});
             extra[field] = json!(value);
