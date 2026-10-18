@@ -570,7 +570,6 @@ async fn batch_metadata(id: Value, params: &Value, columns: bool) -> Value {
     respond(id, async {
         let schema = required_schema(params)?;
         let target = Target::from_params(params).await?;
-        let (resources, _) = table_resources(&target, schema, TABLE_TYPES, None).await?;
         let requested = params
             .get("tables")
             .and_then(Value::as_array)
@@ -580,20 +579,43 @@ async fn batch_metadata(id: Value, params: &Value, columns: bool) -> Value {
                     .filter_map(Value::as_str)
                     .collect::<HashSet<_>>()
             });
+        // Only fetch the tables the host asked for.
+        let tables = catalog::tables(&target.client, &target.project, schema).await?;
+        let names: Vec<String> = object_names(&tables, TABLE_TYPES)
+            .into_iter()
+            .filter(|name| {
+                requested
+                    .as_ref()
+                    .is_none_or(|requested| requested.contains(name.as_str()))
+            })
+            .collect();
+        let fetched = catalog::tables_batch(
+            target.client.clone(),
+            &target.project,
+            schema,
+            names,
+            FETCH_CONCURRENCY,
+        )
+        .await;
+        // One unreadable or concurrently deleted table must not fail the
+        // whole batch: skip it and keep the others.
         let mut result = Map::new();
-        for (name, resource) in &resources {
-            if requested
-                .as_ref()
-                .is_some_and(|requested| !requested.contains(name.as_str()))
-            {
-                continue;
+        for (name, resource) in fetched {
+            let value = resource.and_then(|resource| {
+                if columns {
+                    columns_from_resource(&resource).map(|columns| json!(columns))
+                } else {
+                    Ok(json!(foreign_keys_from_resource(&resource, schema)))
+                }
+            });
+            match value {
+                Ok(value) => {
+                    result.insert(name, value);
+                }
+                Err(error) => {
+                    eprintln!("bigquery-plugin: skipping metadata of {schema}.{name}: {error}")
+                }
             }
-            let value = if columns {
-                json!(columns_from_resource(resource)?)
-            } else {
-                json!(foreign_keys_from_resource(resource, schema))
-            };
-            result.insert(name.clone(), value);
         }
         Ok(Value::Object(result))
     })

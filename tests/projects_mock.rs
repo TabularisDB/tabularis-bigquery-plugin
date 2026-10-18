@@ -150,3 +150,51 @@ async fn editor_ddl_clears_the_metadata_cache() {
     result(&columns().await);
     assert_eq!(table_gets(&server).await, 2, "DDL clears the cache");
 }
+
+#[tokio::test]
+async fn column_batches_fetch_only_requested_tables_and_skip_failures() {
+    let server = MockServer::start().await;
+    let tables = "/bigquery/v2/projects/data/datasets/ds/tables";
+    let reference = |name: &str| json!({"type": "TABLE", "tableReference": {"projectId": "data", "datasetId": "ds", "tableId": name}});
+    Mock::given(method("GET"))
+        .and(path(tables))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tables": [reference("a"), reference("gone"), reference("other")]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{tables}/a")))
+        .respond_with(ResponseTemplate::new(200).set_body_json({
+            let mut table = reference("a");
+            table["schema"] =
+                json!({"fields": [{"name": "id", "type": "INT64", "mode": "REQUIRED"}]});
+            table
+        }))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{tables}/gone")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "error": {"code": 404, "message": "Not found: Table data:ds.gone", "errors": [{"reason": "notFound", "message": "Not found"}]}
+        })))
+        .mount(&server)
+        .await;
+
+    let response = call(
+        "get_all_columns_batch",
+        json!({"params": params(&server), "schema": "ds", "tables": ["a", "gone"]}),
+    )
+    .await;
+    let value = result(&response);
+    assert_eq!(value["a"][0]["name"], "id");
+    assert!(value.get("gone").is_none(), "{value}");
+    assert!(value.get("other").is_none(), "{value}");
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.url.path() != format!("{tables}/other")),
+        "unrequested tables must not be fetched"
+    );
+}
