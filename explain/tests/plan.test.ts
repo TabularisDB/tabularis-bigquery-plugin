@@ -89,4 +89,18 @@ describe("parseBigQueryJob", () => {
     expect(() => parseBigQueryJob('{"version":2,"mode":"analyze"}')).toThrow(/version 2/);
     expect(() => parseBigQueryJob('{"version":1,"mode":"other"}')).toThrow(/unknown mode/);
   });
+
+  it("rejects malformed stages and steps with clear errors", () => {
+    const plan = (query_plan: unknown) =>
+      parseBigQueryJob(JSON.stringify({ version: 1, mode: "analyze", query_plan }));
+    expect(() => plan([null])).toThrow(/query_plan\[0\] must be an object/);
+    expect(() => plan([{ id: "0" }, 7])).toThrow(/query_plan\[1\] must be an object/);
+    expect(() => plan([["stage"]])).toThrow(/query_plan\[0\] must be an object/);
+    expect(() => plan([{ id: "0", inputStages: "1" }])).toThrow(/inputStages must be an array/);
+    expect(() => plan([{ id: "0", steps: {} }])).toThrow(/steps must be an array/);
+    expect(() => plan([{ id: "0", steps: [null] }])).toThrow(/steps\[0\] must be an object/);
+    expect(() => plan([{ id: "0", steps: [{ kind: "READ", substeps: "x" }] }])).toThrow(
+      /substeps must be an array/,
+    );
+  });
 });

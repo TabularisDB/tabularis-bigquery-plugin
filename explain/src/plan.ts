@@ -248,7 +248,34 @@ function parsePayload(payload: string): BigQueryJobPayload {
   if (job.query_plan !== undefined && !Array.isArray(job.query_plan)) {
     throw new Error("BigQuery plan payload query_plan must be an array");
   }
+  job.query_plan?.forEach(validateStage);
   return job;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateStage(stage: unknown, index: number): void {
+  const at = `BigQuery plan payload query_plan[${index}]`;
+  if (!isObject(stage)) {
+    throw new Error(`${at} must be an object`);
+  }
+  if (stage.inputStages !== undefined && !Array.isArray(stage.inputStages)) {
+    throw new Error(`${at}.inputStages must be an array`);
+  }
+  if (stage.steps === undefined) return;
+  if (!Array.isArray(stage.steps)) {
+    throw new Error(`${at}.steps must be an array`);
+  }
+  stage.steps.forEach((step: unknown, stepIndex: number) => {
+    if (!isObject(step)) {
+      throw new Error(`${at}.steps[${stepIndex}] must be an object`);
+    }
+    if (step.substeps !== undefined && !Array.isArray(step.substeps)) {
+      throw new Error(`${at}.steps[${stepIndex}].substeps must be an array`);
+    }
+  });
 }
 
 /** Parse the `bigquery-job-json` payload into a Visual EXPLAIN plan. */
