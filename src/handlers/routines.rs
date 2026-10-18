@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use crate::catalog;
 use crate::handlers::metadata::{required_any, required_schema, respond, Target};
-use crate::models::{inner_params, ConnectionParams};
+use crate::models::optional_data_project;
 use crate::routines::{self, CallArg, RoutineKind};
 
 pub async fn get_routines(id: Value, params: &Value) -> Value {
@@ -79,14 +79,9 @@ pub async fn routine_create_template(id: Value, params: &Value) -> Value {
             .and_then(Value::as_str)
             .unwrap_or("FUNCTION");
         let schema = params.get("schema").and_then(Value::as_str);
-        // Only hosts that attach connection parameters to SQL builders send
-        // `params`; without them the template is dataset-qualified.
-        let connection = params
-            .get("params")
-            .map(|_| ConnectionParams::from_value(inner_params(params)));
-        let project = connection
-            .as_ref()
-            .and_then(|connection| connection.project_id().ok().map(str::to_owned));
+        // Older hosts send no `params`; the template is then
+        // dataset-qualified.
+        let project = optional_data_project(params);
         Ok(json!(routines::create_template(
             routine_type,
             project.as_deref(),

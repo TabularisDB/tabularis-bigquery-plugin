@@ -4,7 +4,7 @@
 //!
 //! The model definitions below are copied from
 //! `tabularis/src-tauri/src/models.rs` at host commit
-//! `27a2489c656bc95817bf316fbaec1fda99087613` (doc comments trimmed). The
+//! `03bee207fe62a64d482dbbc18e4b688203c7fec3` (doc comments trimmed). The
 //! host deserializes plugin results with serde into these exact types, so a
 //! result that fails here fails in Tabularis. Inputs are recorded BigQuery
 //! REST resources in `tests/fixtures/rest/`.
@@ -121,6 +121,8 @@ pub struct ColumnDefinition {
     pub is_pk: bool,
     pub is_auto_increment: bool,
     pub default_value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 
 // END host model definitions.
@@ -339,6 +341,7 @@ async fn sql_builders_return_host_shapes() {
         is_pk: false,
         is_auto_increment: false,
         default_value: None,
+        comment: None,
     };
     let response = rpc(
         "get_create_table_sql",

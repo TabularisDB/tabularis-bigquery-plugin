@@ -1,22 +1,11 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::catalog;
 use crate::handlers::metadata::{respond, Target};
-use crate::models::{inner_params, ColumnDefinition, ConnectionParams};
+use crate::models::{optional_data_project, ColumnDefinition};
 use crate::rpc::{error_response, ok_response};
-use crate::schema_ddl;
+use crate::schema_ddl::{self, TableKind};
 use crate::sql::{canonical_type, object_path, quote_identifier, string_literal};
-
-/// Project for generated SQL. SQL builders only receive connection
-/// parameters on hosts that attach them; without a project the statements
-/// are dataset-qualified and resolve in the job project.
-fn optional_project(params: &Value) -> Option<String> {
-    params.get("params")?;
-    ConnectionParams::from_value(inner_params(params))
-        .project_id()
-        .ok()
-        .map(str::to_owned)
-}
 
 /// Rejects column changes on snapshots, external tables and views when the
 /// host sends connection parameters; without them the table is not looked up.
@@ -93,7 +82,7 @@ pub async fn get_create_table_sql(id: Value, params: &Value) -> Value {
             "Table name, dataset and at least one column are required",
         );
     }
-    let path = object_path(optional_project(params).as_deref(), schema, table);
+    let path = object_path(optional_data_project(params).as_deref(), schema, table);
     match create_table_sql(&path, &columns, &TableOptions::from_params(params)) {
         Ok(sql) => ok_response(id, Value::from(vec![sql])),
         Err(error) => error_response(id, -32602, &error),
@@ -111,7 +100,7 @@ pub async fn get_add_column_sql(id: Value, params: &Value) -> Value {
     if let Err(error) = ensure_editable(params, schema, table).await {
         return error_response(id, -32602, &error);
     }
-    let path = object_path(optional_project(params).as_deref(), schema, table);
+    let path = object_path(optional_data_project(params).as_deref(), schema, table);
     match add_column_sql(&path, &column) {
         Ok(statements) => ok_response(id, Value::from(statements)),
         Err(error) => error_response(id, -32602, &error),
@@ -132,7 +121,7 @@ pub async fn get_alter_column_sql(id: Value, params: &Value) -> Value {
     if let Err(error) = ensure_editable(params, schema, table).await {
         return error_response(id, -32602, &error);
     }
-    let path = object_path(optional_project(params).as_deref(), schema, table);
+    let path = object_path(optional_data_project(params).as_deref(), schema, table);
     match alter_column_sql(&path, &old, &new) {
         Ok(statements) => ok_response(id, Value::from(statements)),
         Err(error) => error_response(id, -32603, &error),
@@ -174,7 +163,7 @@ pub async fn get_create_foreign_key_sql(id: Value, params: &Value) -> Value {
         params.get("on_delete").and_then(Value::as_str),
         params.get("on_update").and_then(Value::as_str),
     ];
-    let project = optional_project(params);
+    let project = optional_data_project(params);
     match foreign_key_sql(
         &object_path(project.as_deref(), schema, table),
         &object_path(project.as_deref(), schema, ref_table),
@@ -230,6 +219,52 @@ pub async fn drop_foreign_key(id: Value, params: &Value) -> Value {
         );
         target_handle.run_ddl(&sql, schema).await?;
         Ok(Value::Null)
+    })
+    .await
+}
+
+/// Statement for the explorer's drop table action. BigQuery needs the object
+/// kind in the keyword (`DROP SNAPSHOT TABLE`, `DROP EXTERNAL TABLE`,
+/// `DROP MATERIALIZED VIEW`, ...) and a project-qualified name, which the
+/// host's generic `DROP TABLE` lacks. Returns `null` (host fallback) when the
+/// request has no connection parameters or no dataset.
+pub async fn get_drop_table_sql(id: Value, params: &Value) -> Value {
+    respond(id, async {
+        let Some((schema, table)) = target(params) else {
+            return Ok(Value::Null);
+        };
+        let Some(connection) = params.get("params") else {
+            return Ok(Value::Null);
+        };
+        // `database` repeats the browsed project; it only matters when the
+        // connection parameters carry none.
+        let mut request = json!({ "params": connection });
+        let browsed = params
+            .get("database")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|database| !database.is_empty());
+        let has_database = connection
+            .get("database")
+            .is_some_and(|database| match database {
+                Value::String(value) => !value.trim().is_empty(),
+                Value::Array(values) => !values.is_empty(),
+                _ => false,
+            });
+        if let (Some(database), false) = (browsed, has_database) {
+            request["params"]["database"] = json!(database);
+        }
+        let target_handle = Target::from_params(&request).await?;
+        // Best effort: an unknown object is dropped as a table and BigQuery
+        // reports the real error.
+        let kind = catalog::table(&target_handle.client, &target_handle.project, schema, table)
+            .await
+            .map(|resource| TableKind::from_resource(&resource))
+            .unwrap_or(TableKind::Table);
+        Ok(json!(schema_ddl::drop_sql(
+            kind,
+            &target_handle.path(schema, table)
+        )))
     })
     .await
 }
@@ -491,17 +526,18 @@ pub fn alter_column_sql(
             .unwrap_or_else(|| "DROP DEFAULT".to_string());
         statements.push(format!("ALTER TABLE {path} ALTER COLUMN {column} {action}"));
     }
-    if let Some(comment) = &new.comment {
-        if old.comment.as_ref() != Some(comment) {
-            let value = if comment.is_empty() {
-                "NULL".to_string()
-            } else {
-                string_literal(comment)
-            };
-            statements.push(format!(
-                "ALTER TABLE {path} ALTER COLUMN {column} SET OPTIONS(description = {value})"
-            ));
-        }
+    // The host omits `comment` when the description is empty, so a missing
+    // new comment next to an old one clears it.
+    let description = |value: &Option<String>| value.clone().filter(|text| !text.is_empty());
+    let new_description = description(&new.comment);
+    if description(&old.comment) != new_description {
+        let value = new_description
+            .as_deref()
+            .map(string_literal)
+            .unwrap_or_else(|| "NULL".to_string());
+        statements.push(format!(
+            "ALTER TABLE {path} ALTER COLUMN {column} SET OPTIONS(description = {value})"
+        ));
     }
     if old.is_pk != new.is_pk {
         if new.is_pk {
@@ -690,10 +726,53 @@ mod tests {
 
     #[test]
     fn uses_project_only_when_connection_params_are_sent() {
-        assert_eq!(optional_project(&json!({"schema": "d"})), None);
+        assert_eq!(optional_data_project(&json!({"schema": "d"})), None);
         assert_eq!(
-            optional_project(&json!({"params": {"database": "my-proj"}})),
+            optional_data_project(&json!({"params": {"database": "my-proj"}})),
             Some("my-proj".to_string())
+        );
+        // "All databases": no browsed project, names resolve in the billing
+        // project like the rest of the metadata calls.
+        assert_eq!(
+            optional_data_project(&json!({
+                "params": {"database": "", "extra": {"billing_project": "bill"}}
+            })),
+            Some("bill".to_string())
+        );
+    }
+
+    #[test]
+    fn alter_column_sets_and_clears_descriptions() {
+        let plain = column("value", "INT64", false);
+        let mut described = plain.clone();
+        described.comment = Some("Net amount".into());
+        assert_eq!(
+            alter_column_sql(PATH, &plain, &described).unwrap(),
+            vec!["ALTER TABLE `my-proj`.`d`.`t` ALTER COLUMN `value` SET OPTIONS(description = 'Net amount')"]
+        );
+        let cleared =
+            "ALTER TABLE `my-proj`.`d`.`t` ALTER COLUMN `value` SET OPTIONS(description = NULL)";
+        assert_eq!(
+            alter_column_sql(PATH, &described, &plain).unwrap(),
+            vec![cleared]
+        );
+        let mut empty = plain.clone();
+        empty.comment = Some(String::new());
+        assert_eq!(
+            alter_column_sql(PATH, &described, &empty).unwrap(),
+            vec![cleared]
+        );
+        assert!(alter_column_sql(PATH, &described, &described.clone()).is_err());
+        assert!(alter_column_sql(PATH, &plain, &empty).is_err());
+    }
+
+    #[test]
+    fn add_column_carries_the_description() {
+        let mut described = column("note", "STRING", false);
+        described.comment = Some("Free text".into());
+        assert_eq!(
+            add_column_sql(PATH, &described).unwrap(),
+            vec!["ALTER TABLE `my-proj`.`d`.`t` ADD COLUMN `note` STRING OPTIONS(description = 'Free text')"]
         );
     }
 }

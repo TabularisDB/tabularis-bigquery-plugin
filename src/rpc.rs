@@ -74,6 +74,7 @@ pub async fn handle_request(request: Value) -> Value {
         "get_create_foreign_key_sql" => {
             handlers::ddl::get_create_foreign_key_sql(id, &params).await
         }
+        "get_drop_table_sql" => handlers::ddl::get_drop_table_sql(id, &params).await,
         "drop_index" => handlers::ddl::drop_index(id, &params).await,
         "drop_foreign_key" => handlers::ddl::drop_foreign_key(id, &params).await,
         "save_blob_to_file" => handlers::blob::save_blob_to_file(id, &params).await,

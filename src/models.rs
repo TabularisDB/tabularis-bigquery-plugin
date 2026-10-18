@@ -146,6 +146,18 @@ pub fn inner_params(value: &Value) -> &Value {
     value.get("params").unwrap_or(value)
 }
 
+/// Data project for generated SQL. Current hosts send the connection
+/// parameters, with the browsed project applied, to every SQL builder; older
+/// hosts send none, and the statements are then dataset-qualified and resolve
+/// in the job project.
+pub fn optional_data_project(request: &Value) -> Option<String> {
+    request.get("params")?;
+    ConnectionParams::from_value(inner_params(request))
+        .data_project_id()
+        .ok()
+        .map(str::to_owned)
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ColumnDefinition {
     pub name: String,
@@ -157,8 +169,9 @@ pub struct ColumnDefinition {
     pub is_auto_increment: bool,
     #[serde(default)]
     pub default_value: Option<String>,
-    /// Column description. Current hosts do not send it; accepted so the
-    /// DDL builders can emit `OPTIONS(description = ...)` when they do.
+    /// Column description. Hosts send it only when the user entered one
+    /// (manifest capability `column_comments`); the DDL builders emit it as
+    /// `OPTIONS(description = ...)`.
     #[serde(default, alias = "description")]
     pub comment: Option<String>,
 }

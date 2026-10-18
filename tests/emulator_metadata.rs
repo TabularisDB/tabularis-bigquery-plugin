@@ -183,9 +183,18 @@ async fn metadata_and_crud_round_trip() {
         .expect("table ddl");
     assert!(ddl.as_str().unwrap().contains(table));
 
-    let _ = emulator
-        .query(&format!("DROP TABLE IF EXISTS {path}"))
-        .await;
+    let drop = emulator
+        .call(
+            "get_drop_table_sql",
+            json!({"table": table, "database": EMULATOR_PROJECT}),
+        )
+        .await
+        .expect("drop table sql");
+    assert_eq!(drop, json!(format!("DROP TABLE IF EXISTS {path}")));
+    emulator
+        .query(drop.as_str().unwrap())
+        .await
+        .expect("drop table");
 }
 
 #[tokio::test]
