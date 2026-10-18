@@ -8,13 +8,13 @@ Requires Tabularis 0.29.0 or later (`min_runtime_version`): it relies on plugin 
 
 ### Query runtime
 
-- Handle JSON-RPC requests concurrently with a single ordered writer, and cancel the running BigQuery job when Tabularis sends a `cancel` notification.
+- Handle JSON-RPC requests concurrently with a single ordered writer, cancel the running BigQuery job when Tabularis sends a `cancel` notification, and answer with an internal error instead of never replying when a request handler fails.
 - Start jobs with a `requestId`, the `client: tabularis` label and a server-side `jobTimeoutMs`; cancel jobs that exceed the query timeout. The default query timeout is now 110 seconds, below the host's 120 second call timeout.
 - Retry HTTP 429, 5xx and 403 `rateLimitExceeded`/`backendError` responses with jittered backoff and refresh the token once after HTTP 401. Judge job failure by `status.errorResult`.
 - Fill result pages across `pageToken` responses, keep the rows returned by `jobs.query`, and read later pages from the finished job instead of running the SQL again.
 - Return TIMESTAMP values with exact microseconds.
 - Serve plain `SELECT * FROM table` table browsing through the free `tabledata.list` API.
-- Support Tabularis editor sessions with BigQuery sessions, transaction tracking and `release_session`; run stateful batches in a short-lived session.
+- Support Tabularis editor sessions with BigQuery sessions, transaction tracking (including COMMIT and ROLLBACK inside scripting blocks) and `release_session`; run stateful batches in a short-lived session.
 - Return the last result set and summed DML row count of multi-statement scripts.
 - Return Visual EXPLAIN as a raw `bigquery-job-json` payload with a bundled parser: dry-run bytes and on-demand cost estimates, and executed stage plans for EXPLAIN ANALYZE.
 - Map common BigQuery error reasons to messages with hints.
@@ -26,7 +26,7 @@ Requires Tabularis 0.29.0 or later (`min_runtime_version`): it relies on plugin 
 - Browse several projects from one connection: `get_databases` lists visible projects plus the `additional_projects` setting, and metadata follows the selected project.
 - Run and bill every job in the optional `billing_project` (default: the GCP Project ID), while unqualified names and table browsing resolve in the selected project.
 - Read routines through the free routines REST API, return host-compatible routine parameters with ordinal positions and a named return row, and add routine management: run, create from templates, edit with rebuilt `CREATE OR REPLACE` scripts (SQL, JavaScript, Python, remote, table and aggregate functions, procedures) and drop.
-- Fetch each table resource once with bounded concurrency for schema snapshots, ER diagram batches and AI context, cache metadata briefly, and return all tables from `get_all_columns_batch` and `get_all_foreign_keys_batch`.
+- Fetch each table resource once with bounded concurrency for schema snapshots, ER diagram batches and AI context, cache metadata briefly, and return the requested tables from `get_all_columns_batch` and `get_all_foreign_keys_batch`, skipping tables that cannot be read instead of failing the batch.
 - Fill table descriptions, parameterized column types, numeric precision and scale, string lengths and composite foreign-key order.
 - Add `get_table_ddl` and use `INFORMATION_SCHEMA.TABLES.ddl` for table, view and materialized view definitions, with a metadata-based fallback that keeps partitioning, clustering and options.
 - Keep view options when saving a view and refuse to replace legacy SQL views.
