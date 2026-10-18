@@ -20,7 +20,12 @@ type ConnectionContext = TypedSlotProps<"connection-modal.extra_fields">["contex
   setSecretField?: (key: string, value: string) => void;
 };
 
-type AuthMethod = "adc" | "service_account" | "authorized_user" | "access_token";
+type AuthMethod = "adc" | "service_account" | "authorized_user" | "access_token" | "none";
+
+// Modes that authenticate without the plugin-owned credential.
+const CREDENTIAL_FREE_METHODS: readonly AuthMethod[] = ["adc", "none"];
+
+const LOOPBACK_ENDPOINT = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i;
 
 function Field({ label, children }: PropsWithChildren<{ label: string }>) {
   return (
@@ -47,6 +52,9 @@ function authenticationHelp(authMethod: AuthMethod, target: string): string {
   if (authMethod === "access_token") {
     return `Put a current OAuth access token in ${target}. Access tokens expire and must be replaced manually.`;
   }
+  if (authMethod === "none") {
+    return "Sends requests without credentials. Only allowed with a localhost API endpoint, such as a BigQuery emulator.";
+  }
   return "No credential field is used. The plugin follows Application Default Credentials, including GOOGLE_APPLICATION_CREDENTIALS, gcloud ADC and attached service accounts.";
 }
 
@@ -62,6 +70,17 @@ const BigQueryConnectionFields = defineSlot(
     const authMethod = (extra.auth_method || "adc") as AuthMethod;
     const setSecretField = connection.setSecretField;
     const secureCredentialAvailable = typeof setSecretField === "function";
+    const apiEndpoint = extra.api_endpoint || "";
+    const endpointIsLocal = LOOPBACK_ENDPOINT.test(apiEndpoint.trim());
+
+    const changeAuthMethod = (next: AuthMethod) => {
+      setExtraField("auth_method", next);
+      // A credential typed or stored for the previous mode must not be kept
+      // silently when the new mode does not use one.
+      if (CREDENTIAL_FREE_METHODS.includes(next) && setSecretField) {
+        setSecretField("credential", "");
+      }
+    };
     const credential = connection.secretFields?.credential ?? {
       value: "",
       hasStoredValue: false,
@@ -95,7 +114,7 @@ const BigQueryConnectionFields = defineSlot(
           <select
             value={authMethod}
             onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-              setExtraField("auth_method", event.target.value)
+              changeAuthMethod(event.target.value as AuthMethod)
             }
             style={styles.input}
           >
@@ -103,12 +122,20 @@ const BigQueryConnectionFields = defineSlot(
             <option value="service_account">Service account JSON</option>
             <option value="authorized_user">OAuth authorized user JSON</option>
             <option value="access_token">OAuth access token</option>
+            <option value="none">No authentication (local emulator)</option>
           </select>
         </Field>
 
         <p style={styles.help}>{authenticationHelp(authMethod, target)}</p>
 
-        {authMethod !== "adc" && secureCredentialAvailable ? (
+        {authMethod === "none" && !endpointIsLocal ? (
+          <p style={styles.warning}>
+            Set a localhost API endpoint under Advanced options, or choose another authentication
+            method.
+          </p>
+        ) : null}
+
+        {!CREDENTIAL_FREE_METHODS.includes(authMethod) && secureCredentialAvailable ? (
           <Field label={credentialLabel(authMethod)}>
             {authMethod === "access_token" ? (
               <input
@@ -166,7 +193,7 @@ const BigQueryConnectionFields = defineSlot(
               type="number"
               min={30}
               max={3600}
-              value={extra.query_timeout_seconds || "300"}
+              value={extra.query_timeout_seconds || "110"}
               onChange={(event: ChangeEvent<HTMLInputElement>) =>
                 setExtraField("query_timeout_seconds", event.target.value)
               }
@@ -187,6 +214,49 @@ const BigQueryConnectionFields = defineSlot(
             style={styles.input}
           />
         </Field>
+
+        <p style={styles.help}>
+          Keep the query timeout at or below the Tabularis plugin call timeout (120 seconds by
+          default) or raise that setting too.
+        </p>
+
+        <details style={styles.details} open={Boolean(apiEndpoint || extra.impersonate_service_account)}>
+          <summary style={styles.summary}>Advanced options</summary>
+          <div style={styles.container}>
+            <Field label="API endpoint">
+              <input
+                value={apiEndpoint}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setExtraField("api_endpoint", event.target.value)
+                }
+                placeholder="https://bigquery.googleapis.com"
+                autoComplete="off"
+                spellCheck={false}
+                style={styles.input}
+              />
+            </Field>
+            <p style={styles.help}>
+              Optional. Use a Private Service Connect endpoint (https) or a local emulator such as
+              http://localhost:9050. Plain http is only accepted for localhost.
+            </p>
+            <Field label="Impersonate service account">
+              <input
+                value={extra.impersonate_service_account || ""}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setExtraField("impersonate_service_account", event.target.value)
+                }
+                placeholder="reader@project.iam.gserviceaccount.com"
+                autoComplete="off"
+                spellCheck={false}
+                style={styles.input}
+              />
+            </Field>
+            <p style={styles.help}>
+              Optional. The selected credential requests short-lived tokens for this service
+              account; it needs the Service Account Token Creator role on it.
+            </p>
+          </div>
+        </details>
       </div>
     );
   },
