@@ -7,6 +7,8 @@
 //! BIGQUERY_EMULATOR_HOST=localhost:9050 cargo test --test emulator
 //! ```
 //!
+//! Metadata, DDL and CRUD round trips live in `emulator_metadata.rs`.
+//!
 //! The emulator does not implement sessions, dry runs, DML row counts,
 //! child jobs or `tabledata.list` paging, so those paths are covered by the
 //! mocked tests and only checked here for graceful behaviour.
@@ -16,35 +18,10 @@ mod support;
 use bigquery_plugin::client::{self, JobRef};
 use bigquery_plugin::models::ConnectionParams;
 use serde_json::{json, Value};
-use support::{call, connection, result};
+use support::{call, result, unique_name};
 
-const PROJECT: &str = "test";
-const DATASET: &str = "ds";
-
-fn endpoint() -> Option<String> {
-    let host = std::env::var("BIGQUERY_EMULATOR_HOST").ok()?;
-    let host = host.trim();
-    if host.is_empty() {
-        return None;
-    }
-    Some(if host.starts_with("http") {
-        host.to_string()
-    } else {
-        format!("http://{host}")
-    })
-}
-
-macro_rules! emulator {
-    () => {
-        match endpoint() {
-            Some(endpoint) => connection(&endpoint, PROJECT),
-            None => {
-                eprintln!("BIGQUERY_EMULATOR_HOST is not set; skipping emulator test");
-                return;
-            }
-        }
-    };
-}
+const PROJECT: &str = support::EMULATOR_PROJECT;
+const DATASET: &str = support::EMULATOR_DATASET;
 
 async fn query(params: &Value, sql: &str, limit: u32, page: u32) -> Value {
     call(
@@ -52,10 +29,6 @@ async fn query(params: &Value, sql: &str, limit: u32, page: u32) -> Value {
         json!({"params": params, "query": sql, "limit": limit, "page": page, "schema": DATASET}),
     )
     .await
-}
-
-fn unique_table(prefix: &str) -> String {
-    format!("{prefix}_{}", uuid::Uuid::new_v4().simple())
 }
 
 async fn create_numbers(params: &Value, table: &str, rows: u32) {
@@ -90,7 +63,7 @@ async fn connects_and_lists_datasets_and_tables() {
         .iter()
         .any(|schema| schema == DATASET));
 
-    let table = unique_table("listing");
+    let table = unique_name("listing");
     create_numbers(&params, &table, 3).await;
     let tables = call("get_tables", json!({"params": params, "schema": DATASET})).await;
     assert!(result(&tables).to_string().contains(&table), "{tables}");
@@ -99,7 +72,7 @@ async fn connects_and_lists_datasets_and_tables() {
 #[tokio::test]
 async fn pages_through_large_results_without_rerunning() {
     let params = emulator!();
-    let table = unique_table("paging");
+    let table = unique_name("paging");
     create_numbers(&params, &table, 2500).await;
     let sql = format!("SELECT n, label FROM `{DATASET}.{table}` ORDER BY n");
 
@@ -123,7 +96,7 @@ async fn pages_through_large_results_without_rerunning() {
 #[tokio::test]
 async fn browses_tables_like_a_table_tab() {
     let params = emulator!();
-    let table = unique_table("browse");
+    let table = unique_name("browse");
     create_numbers(&params, &table, 30).await;
     let sql = format!("SELECT * FROM `{DATASET}`.`{table}` LIMIT 25");
     let first = query(&params, &sql, 20, 1).await;
@@ -137,7 +110,7 @@ async fn browses_tables_like_a_table_tab() {
 #[tokio::test]
 async fn runs_dml_and_reports_success() {
     let params = emulator!();
-    let table = unique_table("dml");
+    let table = unique_name("dml");
     create_numbers(&params, &table, 10).await;
     let response = query(
         &params,

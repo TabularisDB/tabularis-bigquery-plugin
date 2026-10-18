@@ -54,6 +54,7 @@ impl<'a> Paging<'a> {
             page_size: self.page_size,
             page: self.page,
             fetch_rows: true,
+            ..QueryRequest::default()
         }
     }
 

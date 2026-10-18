@@ -40,7 +40,7 @@ async fn create_table_ddl_matches_bigquery_constraints() {
     });
     let response = handle_line(&request.to_string()).await;
     let sql = response["result"][0].as_str().unwrap();
-    assert!(sql.starts_with("CREATE TABLE `analytics.events`"));
+    assert!(sql.starts_with("CREATE TABLE `analytics`.`events`"));
     assert!(sql.contains("`payload` JSON"));
     assert!(sql.contains("PRIMARY KEY (`id`) NOT ENFORCED"));
 }

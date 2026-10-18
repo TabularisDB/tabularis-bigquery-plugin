@@ -17,6 +17,45 @@ pub fn mock_connection(server: &MockServer) -> Value {
     connection(&server.uri(), "p")
 }
 
+/// Project and dataset created by the documented emulator command:
+/// `bigquery-emulator --project=test --dataset=ds`.
+pub const EMULATOR_PROJECT: &str = "test";
+pub const EMULATOR_DATASET: &str = "ds";
+
+/// Connection params for the emulator named by `BIGQUERY_EMULATOR_HOST`, or
+/// `None` when emulator tests should be skipped.
+pub fn emulator_connection() -> Option<Value> {
+    let host = std::env::var("BIGQUERY_EMULATOR_HOST").ok()?;
+    let host = host.trim();
+    if host.is_empty() {
+        return None;
+    }
+    let endpoint = if host.starts_with("http") {
+        host.to_string()
+    } else {
+        format!("http://{host}")
+    };
+    Some(connection(&endpoint, EMULATOR_PROJECT))
+}
+
+/// Skip the current test unless an emulator is configured.
+#[macro_export]
+macro_rules! emulator {
+    () => {
+        match support::emulator_connection() {
+            Some(params) => params,
+            None => {
+                eprintln!("BIGQUERY_EMULATOR_HOST is not set; skipping emulator test");
+                return;
+            }
+        }
+    };
+}
+
+pub fn unique_name(prefix: &str) -> String {
+    format!("{prefix}_{}", uuid::Uuid::new_v4().simple())
+}
+
 pub async fn call(method: &str, params: Value) -> Value {
     handle_request(json!({"jsonrpc": "2.0", "method": method, "params": params, "id": 1})).await
 }

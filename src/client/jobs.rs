@@ -23,9 +23,17 @@ const WAIT_SLICE_MS: u64 = 10_000;
 const RESULT_TTL: Duration = Duration::from_secs(10 * 60);
 const RESULT_CACHE_CAPACITY: usize = 256;
 
+#[derive(Debug, Clone, Default)]
 pub struct QueryRequest<'a> {
     pub sql: &'a str,
     pub dataset: Option<&'a str>,
+    /// Project of `dataset`; defaults to the connection's data project.
+    pub project: Option<&'a str>,
+    /// Overrides the connection location, e.g. with the dataset location.
+    pub location: Option<&'a str>,
+    /// Named `QueryParameter` resources; non-empty switches the job to
+    /// `parameterMode: NAMED`.
+    pub parameters: &'a [Value],
     pub page_size: u32,
     pub page: u32,
     /// False when only the job statistics matter (EXPLAIN ANALYZE).
@@ -179,6 +187,7 @@ impl BigQueryClient {
             page_size: 0,
             page: 1,
             fetch_rows: false,
+            ..QueryRequest::default()
         };
         let (_, job) = self.run_job(&request, session).await?;
         let job = job.ok_or_else(|| "BigQuery did not return a query job".to_string())?;
@@ -196,7 +205,7 @@ impl BigQueryClient {
         let page_size = request.page_size;
         let offset = u64::from(request.page.saturating_sub(1)) * u64::from(page_size);
         let session_key = session.as_ref().and_then(|state| state.bigquery_id.clone());
-        let cache_key = self.result_key(request.sql, request.dataset, session_key.as_deref());
+        let cache_key = self.result_key(request, session_key.as_deref());
 
         if request.page > 1 && request.fetch_rows {
             if let Some((job, affected_rows)) = lookup_result(&cache_key) {
@@ -215,8 +224,11 @@ impl BigQueryClient {
             }
         }
 
-        if session.is_none() && request.fetch_rows {
-            if let Some(target) = crate::browse::parse(request.sql, request.dataset) {
+        if session.is_none() && request.fetch_rows && request.parameters.is_empty() {
+            if let Some(mut target) = crate::browse::parse(request.sql, request.dataset) {
+                if target.project.is_none() {
+                    target.project = request.project.map(str::to_owned);
+                }
                 if let Ok(Some(output)) = self.browse_table(&target, request.page, page_size).await
                 {
                     return Ok((output, None));
@@ -375,7 +387,14 @@ impl BigQueryClient {
             "labels": {"client": "tabularis"},
             "formatOptions": {"useInt64Timestamp": true}
         });
-        let mut location = self.location.clone();
+        if !request.parameters.is_empty() {
+            body["parameterMode"] = json!("NAMED");
+            body["queryParameters"] = Value::Array(request.parameters.to_vec());
+        }
+        let mut location = request
+            .location
+            .map(str::to_owned)
+            .or_else(|| self.location.clone());
         if let Some(state) = session {
             match &state.bigquery_id {
                 Some(id) => {
@@ -394,8 +413,8 @@ impl BigQueryClient {
             body["maximumBytesBilled"] = Value::String(maximum.clone());
         }
         if let Some(dataset) = request.dataset.filter(|value| !value.is_empty()) {
-            body["defaultDataset"] =
-                json!({"projectId": self.data_project(), "datasetId": dataset});
+            let project = request.project.unwrap_or(self.data_project());
+            body["defaultDataset"] = json!({"projectId": project, "datasetId": dataset});
         }
 
         let response = self
@@ -673,12 +692,16 @@ impl BigQueryClient {
             .map_err(String::from)
     }
 
-    fn result_key(&self, sql: &str, dataset: Option<&str>, session: Option<&str>) -> String {
+    fn result_key(&self, request: &QueryRequest<'_>, session: Option<&str>) -> String {
         let mut hasher = Sha256::new();
+        let parameters = Value::Array(request.parameters.to_vec()).to_string();
         for part in [
             self.key.as_str(),
-            sql,
-            dataset.unwrap_or_default(),
+            request.sql,
+            request.dataset.unwrap_or_default(),
+            request.project.unwrap_or_default(),
+            request.location.unwrap_or_default(),
+            parameters.as_str(),
             session.unwrap_or_default(),
         ] {
             hasher.update(part);

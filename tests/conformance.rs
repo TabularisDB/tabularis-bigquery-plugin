@@ -1,6 +1,7 @@
-//! Host-shape conformance: RPC results must deserialize into the structures
-//! Tabularis uses (copied from `src-tauri/src/models.rs` and the response
-//! readers in `src-tauri/src/plugins/driver.rs`).
+//! Query, session and explain conformance: RPC results must deserialize into
+//! the structures Tabularis uses (copied from `src-tauri/src/models.rs` and
+//! the response readers in `src-tauri/src/plugins/driver.rs`). Metadata, DDL
+//! and routine shapes are covered by `conformance_metadata.rs`.
 
 mod support;
 

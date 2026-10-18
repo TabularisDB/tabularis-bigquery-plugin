@@ -66,6 +66,37 @@ impl ConnectionParams {
             .ok_or_else(|| "Project ID is required in the Database field".to_string())
     }
 
+    /// Project that owns and pays for query jobs. Multi-project browsing
+    /// sends the selected project in `database`, so an explicit
+    /// `billing_project` extra keeps jobs in the configured project.
+    pub fn billing_project_id(&self) -> Result<&str, String> {
+        match self.extra_value("billing_project") {
+            Some(project) => Ok(project),
+            None => self.project_id(),
+        }
+    }
+
+    /// Project whose datasets are browsed: the selected database, or the
+    /// billing project when the host sends no database ("all databases").
+    pub fn data_project_id(&self) -> Result<&str, String> {
+        self.project_id().or_else(|_| self.billing_project_id())
+    }
+
+    /// Projects listed by `get_databases` in addition to the projects the
+    /// credential can see, e.g. `bigquery-public-data`.
+    pub fn additional_projects(&self) -> Vec<String> {
+        self.extra_value("additional_projects")
+            .map(|value| {
+                value
+                    .split([',', '\n', ' '])
+                    .map(str::trim)
+                    .filter(|project| !project.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn extra_value(&self, key: &str) -> Option<&str> {
         self.extra
             .get(key)
@@ -126,6 +157,10 @@ pub struct ColumnDefinition {
     pub is_auto_increment: bool,
     #[serde(default)]
     pub default_value: Option<String>,
+    /// Column description. Current hosts do not send it; accepted so the
+    /// DDL builders can emit `OPTIONS(description = ...)` when they do.
+    #[serde(default, alias = "description")]
+    pub comment: Option<String>,
 }
 
 #[cfg(test)]
@@ -145,6 +180,24 @@ mod tests {
         assert_eq!(params.project_id().unwrap(), "billing-project");
         assert_eq!(params.auth_method(), "adc");
         assert!(!params.extra.contains_key("ignored"));
+    }
+
+    #[test]
+    fn billing_project_defaults_to_database_and_honors_override() {
+        let value = json!({"database": "public-data"});
+        let params = ConnectionParams::from_value(&value);
+        assert_eq!(params.billing_project_id().unwrap(), "public-data");
+        let value = json!({
+            "database": "bigquery-public-data",
+            "extra": {"billing_project": "my-billing", "additional_projects": "a-1, b-2\nc"}
+        });
+        let params = ConnectionParams::from_value(&value);
+        assert_eq!(params.project_id().unwrap(), "bigquery-public-data");
+        assert_eq!(params.billing_project_id().unwrap(), "my-billing");
+        assert_eq!(params.additional_projects(), vec!["a-1", "b-2", "c"]);
+        let value = json!({"database": "", "extra": {"billing_project": "my-billing"}});
+        let params = ConnectionParams::from_value(&value);
+        assert_eq!(params.data_project_id().unwrap(), "my-billing");
     }
 
     #[test]
