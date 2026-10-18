@@ -18,14 +18,23 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          cache-dependency-path: |
+            ui/pnpm-lock.yaml
+            explain/pnpm-lock.yaml
       - run: pnpm --dir ui install --frozen-lockfile
       - run: pnpm --dir ui typecheck
       - run: pnpm --dir ui build
+      - run: pnpm --dir explain install --frozen-lockfile
+      - run: pnpm --dir explain typecheck
+      - run: pnpm --dir explain test
       - uses: actions/upload-artifact@v7
         with:
           name: ui-dist
           path: ui/dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: explain-dist
+          path: explain/dist/index.iife.js
 
   build:
     name: ${{ matrix.platform-label }}
@@ -74,22 +83,29 @@ jobs:
         with:
           name: ui-dist
           path: ui/dist/
+      - uses: actions/download-artifact@v8
+        with:
+          name: explain-dist
+          path: explain/dist/
       - name: Package on Unix
         if: runner.os != 'Windows'
         run: |
-          mkdir -p staging/ui/dist
+          mkdir -p staging/ui/dist staging/explain/dist
           cp target/${{ matrix.target }}/release/bigquery-plugin${{ matrix.binary-suffix }} staging/
           cp .tabularium staging/
           cp ui/dist/*.js staging/ui/dist/
+          cp explain/dist/index.iife.js staging/explain/dist/
           (cd staging && zip -r ../bigquery-plugin-${{ matrix.platform-label }}.zip .)
       - name: Package on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "staging\ui\dist" | Out-Null
+          New-Item -ItemType Directory -Force -Path "staging\explain\dist" | Out-Null
           Copy-Item "target\${{ matrix.target }}\release\bigquery-plugin${{ matrix.binary-suffix }}" staging
           Copy-Item ".tabularium" staging
           Copy-Item "ui\dist\*.js" "staging\ui\dist"
+          Copy-Item "explain\dist\index.iife.js" "staging\explain\dist"
           Compress-Archive -Path "staging\*" -DestinationPath "bigquery-plugin-${{ matrix.platform-label }}.zip"
       - name: Smoke test on Unix
         if: runner.os != 'Windows' && !matrix.cross
