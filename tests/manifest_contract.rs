@@ -14,6 +14,12 @@ fn manifest_release_files_exist_and_versions_match() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     assert!(root.join("ui/src/connection-fields.tsx").is_file());
     assert!(root.join("ui/vite.config.ts").is_file());
+    let icon = manifest["icon"].as_str().unwrap();
+    let icon_file = icon.rsplit('/').next().unwrap();
+    assert!(icon.starts_with(
+        "https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/"
+    ));
+    assert!(root.join(icon_file).is_file(), "{icon_file}");
 }
 
 #[test]

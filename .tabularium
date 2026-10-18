@@ -28,7 +28,7 @@
   "default_username": "",
   "executable": "bigquery-plugin",
   "color": "#4285F4",
-  "icon": "cloud",
+  "icon": "https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/bigquery-icon.svg",
   "connection_fields": {
     "host": {"hidden": true},
     "port": {"hidden": true},
