@@ -121,7 +121,7 @@ impl BigQueryClient {
     /// Cheapest authenticated call: one dataset of the project.
     pub async fn ping(&self) -> Result<(), String> {
         self.get(
-            &["projects", &self.project_id, "datasets"],
+            &["projects", self.data_project(), "datasets"],
             &[("maxResults".to_string(), "1".to_string())],
         )
         .await

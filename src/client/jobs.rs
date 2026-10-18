@@ -149,17 +149,18 @@ fn page_token_of(response: &Value) -> Option<String> {
 
 impl BigQueryClient {
     // Project selection for jobs and unqualified names lives only in these two
-    // helpers, so a separate billing project can be wired in here alone.
+    // helpers.
 
-    /// Project that runs and bills query jobs.
+    /// Project that runs and bills query jobs (`billing_project`, or the
+    /// connection's project).
     fn job_project(&self) -> &str {
         &self.project_id
     }
 
     /// Project of unqualified table names (`defaultDataset.projectId`) and of
-    /// table browsing.
+    /// table browsing: the selected database, not the billing project.
     pub(crate) fn data_project(&self) -> &str {
-        &self.project_id
+        &self.data_project
     }
 
     /// Run a statement and return one page of its result.

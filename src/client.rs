@@ -25,7 +25,11 @@ static CLIENTS: OnceLock<Mutex<HashMap<String, Arc<BigQueryClient>>>> = OnceLock
 pub struct BigQueryClient {
     http: reqwest::Client,
     auth: AuthProvider,
+    /// Project that runs and bills query jobs (the billing project).
     pub project_id: String,
+    /// Project of unqualified names and of table browsing (the selected
+    /// database, falling back to the billing project).
+    data_project: String,
     location: Option<String>,
     max_bytes_billed: Option<String>,
     timeout: Duration,
@@ -38,6 +42,7 @@ impl BigQueryClient {
     async fn new(params: &ConnectionParams) -> Result<Self, String> {
         let timeout = Duration::from_secs(params.timeout_seconds());
         let project_id = params.billing_project_id()?.to_string();
+        let data_project = params.data_project_id()?.to_string();
         let max_bytes_billed = params
             .max_bytes_billed()
             .map(|value| {
@@ -61,6 +66,7 @@ impl BigQueryClient {
             http,
             auth: AuthProvider::from_params(params, &endpoint).await?,
             project_id,
+            data_project,
             location: params.location().map(str::to_owned),
             max_bytes_billed,
             timeout,
@@ -107,7 +113,7 @@ fn cache_key(params: &ConnectionParams) -> String {
     let mut hasher = Sha256::new();
     for part in [
         params.billing_project_id().unwrap_or_default(),
-        params.project_id.as_deref().unwrap_or_default(),
+        params.data_project_id().unwrap_or_default(),
         params.auth_method(),
         params.credential().unwrap_or_default(),
         params.location().unwrap_or_default(),
