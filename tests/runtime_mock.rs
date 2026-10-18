@@ -604,3 +604,145 @@ async fn ping_lists_a_single_dataset() {
     assert_eq!(response["result"], Value::Null);
     tokio::time::sleep(Duration::from_millis(10)).await;
 }
+
+#[tokio::test]
+async fn later_pages_of_a_session_creating_statement_reuse_its_job() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(QUERIES))
+        .and(body_partial_json(json!({"createSession": true})))
+        .respond_with(ResponseTemplate::new(200).set_body_json({
+            let mut response = complete("sp", &[1, 2], 4, Some("t"));
+            response["sessionInfo"] = json!({"sessionId": "bq-paged"});
+            response
+        }))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{QUERIES}/sp")))
+        .and(query_param("startIndex", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(complete("sp", &[3, 4], 4, None)))
+        .mount(&server)
+        .await;
+    let run = |page: u32| {
+        let mut params = query_params(&server, "SELECT n FROM t ORDER BY n", 2, page);
+        params["session_id"] = json!("tab-paged");
+        call("execute_query", params)
+    };
+    let first = run(1).await;
+    assert_eq!(result(&first)["result"]["rows"], json!([[1], [2]]));
+    let second = run(2).await;
+    assert_eq!(result(&second)["result"]["rows"], json!([[3], [4]]));
+    assert_eq!(
+        bodies(&server, "POST", QUERIES).await.len(),
+        1,
+        "page 2 must not run the statement again"
+    );
+    call("release_session", json!({"session_id": "tab-paged"})).await;
+}
+
+#[tokio::test]
+async fn failed_session_creating_jobs_still_release_their_session() {
+    let server = MockServer::start().await;
+    let mut failed = complete("sf", &[], 0, None);
+    failed["errors"] = json!([{"reason": "invalidQuery", "message": "Division by zero"}]);
+    Mock::given(method("POST"))
+        .and(path(QUERIES))
+        .and(body_partial_json(json!({"createSession": true})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(failed))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{JOBS}/sf")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": {"state": "DONE", "errorResult": {"reason": "invalidQuery", "message": "Division by zero"}},
+            "statistics": {"sessionInfo": {"sessionId": "bq-failed"}}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(QUERIES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(complete("ab", &[], 0, None)))
+        .with_priority(5)
+        .mount(&server)
+        .await;
+
+    let mut params = query_params(&server, "SELECT 1 / 0", 10, 1);
+    params["session_id"] = json!("tab-failed");
+    let response = call("execute_query", params).await;
+    assert!(result(&response)["error"]
+        .as_str()
+        .unwrap()
+        .contains("Division by zero"));
+    call("release_session", json!({"session_id": "tab-failed"})).await;
+    let posts = bodies(&server, "POST", QUERIES).await;
+    assert_eq!(
+        posts.last().unwrap()["query"],
+        "CALL BQ.ABORT_SESSION('bq-failed')"
+    );
+}
+
+#[tokio::test]
+async fn repeated_child_job_page_tokens_fail_instead_of_looping() {
+    let server = MockServer::start().await;
+    let mut parent = complete("loop", &[], 0, None);
+    parent["schema"] = Value::Null;
+    Mock::given(method("POST"))
+        .and(path(QUERIES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(parent))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{JOBS}/loop")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "statistics": {"query": {"statementType": "SCRIPT"}}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(JOBS))
+        .and(query_param("parentJobId", "loop"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "jobs": [], "nextPageToken": "same"
+        })))
+        .mount(&server)
+        .await;
+    let sql = "SELECT 1; SELECT 2";
+    let response = call("execute_query", query_params(&server, sql, 10, 1)).await;
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(message.contains("twice"), "{message}");
+    assert_eq!(queries(&server, "GET", JOBS).await.len(), 2);
+}
+
+#[tokio::test]
+async fn repeated_result_page_tokens_fail_instead_of_duplicating_rows() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(QUERIES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(complete(
+            "dup",
+            &[1],
+            10,
+            Some("same"),
+        )))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{QUERIES}/dup")))
+        .and(query_param("pageToken", "same"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(complete(
+            "dup",
+            &[2],
+            10,
+            Some("same"),
+        )))
+        .mount(&server)
+        .await;
+    let response = call(
+        "execute_query",
+        query_params(&server, "SELECT n FROM t", 5, 1),
+    )
+    .await;
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(message.contains("twice"), "{message}");
+}

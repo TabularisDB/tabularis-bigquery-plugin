@@ -1,7 +1,7 @@
 //! Query job lifecycle: start, wait, cancel, page through results and reuse
 //! a finished job for later pages.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -22,6 +22,8 @@ const WAIT_SLICE_MS: u64 = 10_000;
 /// Finished results stay addressable for later pages for this long.
 const RESULT_TTL: Duration = Duration::from_secs(10 * 60);
 const RESULT_CACHE_CAPACITY: usize = 256;
+/// Upper bound on jobs.list pages read for one script's child jobs.
+const MAX_CHILD_JOB_PAGES: usize = 100;
 
 #[derive(Debug, Clone, Default)]
 pub struct QueryRequest<'a> {
@@ -206,6 +208,8 @@ impl BigQueryClient {
         let page_size = request.page_size;
         let offset = u64::from(request.page.saturating_sub(1)) * u64::from(page_size);
         let session_key = session.as_ref().and_then(|state| state.bigquery_id.clone());
+        // Only used for the lookup: `finish` re-keys after it captured the id
+        // of a session created by this statement, so later pages find it.
         let cache_key = self.result_key(request, session_key.as_deref());
 
         if request.page > 1 && request.fetch_rows {
@@ -259,7 +263,6 @@ impl BigQueryClient {
                 session,
                 rows_requested,
                 offset,
-                &cache_key,
             )
             .await
         }
@@ -278,7 +281,6 @@ impl BigQueryClient {
         session: Option<&mut SessionState>,
         rows_requested: bool,
         offset: u64,
-        cache_key: &str,
     ) -> Result<QueryOutput, String> {
         let mut resource: Option<Value> = None;
         let has_errors = done
@@ -288,33 +290,24 @@ impl BigQueryClient {
         if has_errors {
             let job_resource = self.get_job(job).await?;
             if let Some(error) = job_resource.pointer("/status/errorResult") {
+                // A failed `createSession` job may still have created the
+                // session: remember it so releasing the tab aborts it.
+                let mut failed = Some(job_resource.clone());
+                if let Some(state) = session {
+                    self.capture_session(state, job, initial, &mut failed).await;
+                }
                 return Err(ApiError::from_error_proto(error).describe());
             }
             resource = Some(job_resource);
         }
 
+        let mut session_key: Option<String> = None;
         if let Some(state) = session {
-            if state.bigquery_id.is_none() {
-                let mut id = initial
-                    .pointer("/sessionInfo/sessionId")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                if id.is_none() {
-                    if resource.is_none() {
-                        resource = self.get_job(job).await.ok();
-                    }
-                    id = resource
-                        .as_ref()
-                        .and_then(|value| value.pointer("/statistics/sessionInfo/sessionId"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                }
-                if id.is_some() {
-                    state.bigquery_id = id;
-                    state.location = job.location.clone();
-                }
-            }
+            self.capture_session(state, job, initial, &mut resource)
+                .await;
+            session_key = state.bigquery_id.clone();
         }
+        let cache_key = self.result_key(request, session_key.as_deref());
 
         let mut result_job = Some(job.clone());
         let mut affected_rows = string_u64(done.get("numDmlAffectedRows")).unwrap_or_default();
@@ -366,10 +359,42 @@ impl BigQueryClient {
 
         if let (Some(result_job), true) = (result_job, request.fetch_rows) {
             if !output.fields.is_empty() {
-                store_result(cache_key.to_string(), result_job, affected_rows);
+                store_result(cache_key, result_job, affected_rows);
             }
         }
         Ok(output)
+    }
+
+    /// Record the BigQuery session a `createSession` job created, from the
+    /// query response or, failing that, the job resource (fetched on demand).
+    async fn capture_session(
+        &self,
+        state: &mut SessionState,
+        job: &JobRef,
+        initial: &Value,
+        resource: &mut Option<Value>,
+    ) {
+        if state.bigquery_id.is_some() {
+            return;
+        }
+        let mut id = initial
+            .pointer("/sessionInfo/sessionId")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if id.is_none() {
+            if resource.is_none() {
+                *resource = self.get_job(job).await.ok();
+            }
+            id = resource
+                .as_ref()
+                .and_then(|value| value.pointer("/statistics/sessionInfo/sessionId"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+        if id.is_some() {
+            state.bigquery_id = id;
+            state.location = job.location.clone();
+        }
     }
 
     async fn start_query(
@@ -491,10 +516,18 @@ impl BigQueryClient {
         let mut page_token = page_token_of(&first);
         let total_rows = string_u64(first.get("totalRows"));
         let schema = first.get("schema").cloned().unwrap_or(Value::Null);
+        let mut seen_tokens: HashSet<String> = HashSet::new();
         while rows.len() < page_size as usize {
             let Some(token) = page_token.clone() else {
                 break;
             };
+            // A repeated token would read the same rows twice.
+            if !seen_tokens.insert(token.clone()) {
+                return Err(format!(
+                    "BigQuery returned the page token '{token}' twice while reading job {}",
+                    job.job_id
+                ));
+            }
             let remaining = page_size - rows.len() as u32;
             let next = self
                 .get_query_results(job, None, remaining, Some(&token))
@@ -575,7 +608,8 @@ impl BigQueryClient {
     async fn list_child_jobs(&self, job: &JobRef) -> Result<Vec<Value>, String> {
         let mut children = Vec::new();
         let mut page_token: Option<String> = None;
-        loop {
+        let mut seen_tokens: HashSet<String> = HashSet::new();
+        for _ in 0..MAX_CHILD_JOB_PAGES {
             let mut query = vec![
                 ("parentJobId".to_string(), job.job_id.clone()),
                 ("maxResults".to_string(), "1000".to_string()),
@@ -597,12 +631,23 @@ impl BigQueryClient {
             page_token = response
                 .get("nextPageToken")
                 .and_then(Value::as_str)
+                .filter(|token| !token.is_empty())
                 .map(str::to_owned);
-            if page_token.is_none() {
-                break;
+            match &page_token {
+                None => return Ok(children),
+                Some(token) if !seen_tokens.insert(token.clone()) => {
+                    return Err(format!(
+                        "BigQuery returned the page token '{token}' twice while listing the child jobs of {}",
+                        job.job_id
+                    ));
+                }
+                Some(_) => {}
             }
         }
-        Ok(children)
+        Err(format!(
+            "Script job {} has more than {} pages of child jobs",
+            job.job_id, MAX_CHILD_JOB_PAGES
+        ))
     }
 
     /// Ask BigQuery to stop a job. Errors are ignored by callers: the job may
