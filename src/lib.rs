@@ -1,7 +1,10 @@
 pub mod auth;
 pub mod bigquery;
+pub mod catalog;
 pub mod client;
 pub mod handlers;
 pub mod models;
+pub mod routines;
 pub mod rpc;
+pub mod schema_ddl;
 pub mod sql;

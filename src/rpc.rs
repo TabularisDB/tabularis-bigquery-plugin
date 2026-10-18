@@ -44,9 +44,14 @@ pub async fn handle_line(line: &str) -> Value {
         "refresh_materialized_view" => {
             handlers::metadata::refresh_materialized_view(id, &params).await
         }
-        "get_routines" => handlers::metadata::get_routines(id, &params).await,
-        "get_routine_parameters" => handlers::metadata::get_routine_parameters(id, &params).await,
-        "get_routine_definition" => handlers::metadata::get_routine_definition(id, &params).await,
+        "get_routines" => handlers::routines::get_routines(id, &params).await,
+        "get_routine_parameters" => handlers::routines::get_routine_parameters(id, &params).await,
+        "get_routine_definition" => handlers::routines::get_routine_definition(id, &params).await,
+        "get_routine_edit_script" => handlers::routines::get_routine_edit_script(id, &params).await,
+        "build_routine_call_sql" => handlers::routines::build_routine_call_sql(id, &params).await,
+        "routine_create_template" => handlers::routines::routine_create_template(id, &params).await,
+        "drop_routine" => handlers::routines::drop_routine(id, &params).await,
+        "get_table_ddl" => handlers::metadata::get_table_ddl(id, &params).await,
         "get_schema_snapshot" => handlers::metadata::get_schema_snapshot(id, &params).await,
         "get_all_columns_batch" => handlers::metadata::get_all_columns_batch(id, &params).await,
         "get_all_foreign_keys_batch" => {
