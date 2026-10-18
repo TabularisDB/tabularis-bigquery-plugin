@@ -60,9 +60,29 @@ pub async fn release_all() {
 }
 
 pub async fn abort(state: &mut SessionState) -> Result<(), String> {
-    let (Some(client), Some(id)) = (state.client.clone(), state.bigquery_id.take()) else {
+    // Take the id only once there is a client to abort it with, so it is
+    // never dropped without aborting the server-side session.
+    let Some(client) = state.client.clone() else {
+        return Ok(());
+    };
+    let Some(id) = state.bigquery_id.take() else {
         return Ok(());
     };
     state.in_transaction = false;
     client.abort_session(&id, state.location.as_deref()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn abort_without_client_keeps_the_session_id() {
+        let mut state = SessionState {
+            bigquery_id: Some("bq-session".into()),
+            ..SessionState::default()
+        };
+        abort(&mut state).await.unwrap();
+        assert_eq!(state.bigquery_id.as_deref(), Some("bq-session"));
+    }
 }
