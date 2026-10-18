@@ -5,7 +5,8 @@ use serde_json::Value;
 #[test]
 fn manifest_release_files_exist_and_versions_match() {
     let manifest: Value = serde_json::from_str(include_str!("../.tabularium")).unwrap();
-    assert_eq!(manifest["name"], "bigquery");
+    assert_eq!(manifest["id"], "bigquery");
+    assert_eq!(manifest["name"], "BigQuery");
     assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(manifest["executable"], "bigquery-plugin");
     let extension = &manifest["ui_extensions"].as_array().unwrap()[0];

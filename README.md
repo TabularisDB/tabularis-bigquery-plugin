@@ -128,9 +128,9 @@ Use `bigquery-plugin.exe` on Windows.
 
 | OS | Plugin directory |
 | --- | --- |
-| Linux | `~/.local/share/tabularis/plugins/bigquery/` |
-| macOS | `~/Library/Application Support/com.debba.tabularis/plugins/bigquery/` |
-| Windows | `%APPDATA%\debba\tabularis\data\plugins\bigquery\` |
+| Linux | `~/.local/share/tabularis/plugins/drivers/bigquery/` |
+| macOS | `~/Library/Application Support/tabularis/plugins/drivers/bigquery/` |
+| Windows | `%APPDATA%\tabularis\plugins\drivers\bigquery\` |
 
 ## Build and test
 

@@ -13,6 +13,9 @@ ui-install:
 ui-build:
     pnpm --dir ui build
 
+explain-build:
+    pnpm --dir explain build
+
 ui-typecheck:
     pnpm --dir ui typecheck
 
@@ -30,15 +33,17 @@ check-ui:
     pnpm --dir ui build
 
 [linux]
-dev-install: build ui-build
-    mkdir -p ~/.local/share/tabularis/plugins/bigquery/ui/dist
-    cp target/debug/bigquery-plugin ~/.local/share/tabularis/plugins/bigquery/
-    cp .tabularium ~/.local/share/tabularis/plugins/bigquery/
-    cp ui/dist/*.js ~/.local/share/tabularis/plugins/bigquery/ui/dist/
+dev-install: build ui-build explain-build
+    mkdir -p ~/.local/share/tabularis/plugins/drivers/bigquery/ui/dist ~/.local/share/tabularis/plugins/drivers/bigquery/explain/dist
+    cp target/debug/bigquery-plugin ~/.local/share/tabularis/plugins/drivers/bigquery/
+    cp .tabularium ~/.local/share/tabularis/plugins/drivers/bigquery/
+    cp ui/dist/*.js ~/.local/share/tabularis/plugins/drivers/bigquery/ui/dist/
+    cp explain/dist/index.iife.js ~/.local/share/tabularis/plugins/drivers/bigquery/explain/dist/
 
 [macos]
-dev-install: build ui-build
-    mkdir -p "$HOME/Library/Application Support/com.debba.tabularis/plugins/bigquery/ui/dist"
-    cp target/debug/bigquery-plugin "$HOME/Library/Application Support/com.debba.tabularis/plugins/bigquery/"
-    cp .tabularium "$HOME/Library/Application Support/com.debba.tabularis/plugins/bigquery/"
-    cp ui/dist/*.js "$HOME/Library/Application Support/com.debba.tabularis/plugins/bigquery/ui/dist/"
+dev-install: build ui-build explain-build
+    mkdir -p "$HOME/Library/Application Support/tabularis/plugins/drivers/bigquery/ui/dist" "$HOME/Library/Application Support/tabularis/plugins/drivers/bigquery/explain/dist"
+    cp target/debug/bigquery-plugin "$HOME/Library/Application Support/tabularis/plugins/drivers/bigquery/"
+    cp .tabularium "$HOME/Library/Application Support/tabularis/plugins/drivers/bigquery/"
+    cp ui/dist/*.js "$HOME/Library/Application Support/tabularis/plugins/drivers/bigquery/ui/dist/"
+    cp explain/dist/index.iife.js "$HOME/Library/Application Support/tabularis/plugins/drivers/bigquery/explain/dist/"

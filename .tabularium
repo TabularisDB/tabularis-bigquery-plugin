@@ -1,6 +1,7 @@
 {
   "$schema": "https://registry.tabularis.dev/manifest.schema.json?kind=driver",
-  "name": "bigquery",
+  "id": "bigquery",
+  "name": "BigQuery",
   "version": "0.2.0",
   "description": "Google BigQuery driver for Tabularis with multi-project browsing, cancellable paged queries, sessions and transactions, query plans, GoogleSQL, materialized views, routine management, typed row editing and cost controls.",
   "category": "database",
