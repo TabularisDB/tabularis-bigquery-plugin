@@ -1,5 +1,9 @@
-//! Billing and data projects and metadata statements on the job runtime,
-//! against a mocked BigQuery REST API.
+//! Billing and data projects, metadata statements on the job runtime and
+//! metadata cache invalidation, against a mocked BigQuery REST API.
+//!
+//! Kept in its own test binary: the metadata cache is process-wide, so
+//! statements in other suites would invalidate it while these tests count
+//! `tables.get` calls.
 
 mod support;
 
@@ -37,6 +41,16 @@ async fn mount_table(server: &MockServer) {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"location": "EU"})))
         .mount(server)
         .await;
+}
+
+async fn table_gets(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| request.method.as_str() == "GET" && request.url.path() == TABLE)
+        .count()
 }
 
 #[tokio::test]
@@ -101,4 +115,38 @@ async fn row_edits_use_the_job_runtime_with_typed_parameters() {
         .iter()
         .any(|parameter| parameter["parameterValue"]["value"] == "O'Reilly"));
     assert!(!body["query"].as_str().unwrap().contains("O'Reilly"));
+}
+
+#[tokio::test]
+async fn editor_ddl_clears_the_metadata_cache() {
+    let server = MockServer::start().await;
+    mount_table(&server).await;
+    Mock::given(method("POST"))
+        .and(path(BILLING_QUERIES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "jobReference": {"projectId": "bill", "jobId": "ddl", "location": "EU"},
+            "jobComplete": true
+        })))
+        .mount(&server)
+        .await;
+    let columns = || {
+        call(
+            "get_columns",
+            json!({"params": params(&server), "schema": "ds", "table": "items"}),
+        )
+    };
+    let query = |sql: &'static str| {
+        call(
+            "execute_query",
+            json!({"params": params(&server), "query": sql, "limit": 10, "page": 1, "schema": "ds"}),
+        )
+    };
+
+    result(&columns().await);
+    result(&columns().await);
+    assert_eq!(table_gets(&server).await, 1, "second lookup is cached");
+
+    result(&query("ALTER TABLE items ADD COLUMN note STRING").await);
+    result(&columns().await);
+    assert_eq!(table_gets(&server).await, 2, "DDL clears the cache");
 }

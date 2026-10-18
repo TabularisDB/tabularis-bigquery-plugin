@@ -4,6 +4,7 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use crate::bigquery::QueryOutput;
+use crate::catalog;
 use crate::client::{self, BigQueryClient, QueryRequest};
 use crate::explain;
 use crate::models::{inner_params, ConnectionParams};
@@ -73,8 +74,23 @@ fn session_id(params: &Value) -> Option<&str> {
 }
 
 /// Run one statement, inside a session when one is given, and keep the
-/// session's transaction flag in step with BEGIN / COMMIT / ROLLBACK.
+/// session's transaction flag in step with BEGIN / COMMIT / ROLLBACK. Any
+/// statement that is not a plain query may have changed the catalog, so the
+/// metadata cache is cleared once it has run.
 async fn run_statement(
+    client: &Arc<BigQueryClient>,
+    state: Option<&mut SessionState>,
+    request: &QueryRequest<'_>,
+) -> Result<QueryOutput, String> {
+    let result = run_in_session(client, state, request).await;
+    if !statements::is_read_only_query(request.sql) {
+        // Also after a failure: a script may have applied part of its DDL.
+        catalog::invalidate();
+    }
+    result
+}
+
+async fn run_in_session(
     client: &Arc<BigQueryClient>,
     state: Option<&mut SessionState>,
     request: &QueryRequest<'_>,
