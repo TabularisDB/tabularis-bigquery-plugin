@@ -295,6 +295,26 @@ async fn drop_table_without_context_falls_back_to_the_host() {
 }
 
 #[tokio::test]
+async fn drop_table_without_credentials_still_qualifies_the_table() {
+    let mut params = host_params(UNUSED);
+    params["extra"]["auth_method"] = json!("service_account");
+    let response = call(
+        "get_drop_table_sql",
+        json!({
+            "params": params,
+            "table": "orders",
+            "schema": "sales",
+            "database": "analytics-project"
+        }),
+    )
+    .await;
+    assert_eq!(
+        result(&response),
+        &json!("DROP TABLE IF EXISTS `analytics-project`.`sales`.`orders`")
+    );
+}
+
+#[tokio::test]
 async fn drop_table_uses_the_database_field_when_params_have_none() {
     let server = MockServer::start().await;
     mount_kind(&server, "daily_snapshot", Some("SNAPSHOT")).await;

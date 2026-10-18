@@ -5,7 +5,7 @@ use crate::handlers::metadata::{respond, Target};
 use crate::models::{optional_data_project, ColumnDefinition};
 use crate::rpc::{error_response, ok_response};
 use crate::schema_ddl::{self, TableKind};
-use crate::sql::{canonical_type, object_path, quote_identifier, string_literal};
+use crate::sql::{canonical_type, fully_qualified, object_path, quote_identifier, string_literal};
 
 /// Rejects column changes on snapshots, external tables and views when the
 /// host sends connection parameters; without them the table is not looked up.
@@ -254,7 +254,22 @@ pub async fn get_drop_table_sql(id: Value, params: &Value) -> Value {
         if let (Some(database), false) = (browsed, has_database) {
             request["params"]["database"] = json!(database);
         }
-        let target_handle = Target::from_params(&request).await?;
+        // Without a usable client (missing or invalid credentials) the kind
+        // cannot be looked up: drop it as a table and let BigQuery report the
+        // real error rather than blocking the drop in the explorer.
+        let target_handle = match Target::from_params(&request).await {
+            Ok(target_handle) => target_handle,
+            Err(_) => {
+                return Ok(
+                    optional_data_project(&request).map_or(Value::Null, |project| {
+                        json!(schema_ddl::drop_sql(
+                            TableKind::Table,
+                            &fully_qualified(&project, schema, table)
+                        ))
+                    }),
+                );
+            }
+        };
         // Best effort: an unknown object is dropped as a table and BigQuery
         // reports the real error.
         let kind = catalog::table(&target_handle.client, &target_handle.project, schema, table)
