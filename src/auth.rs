@@ -49,12 +49,9 @@ impl AuthProvider {
                 .map_err(|error| format!("Application Default Credentials are unavailable: {error}")),
             "service_account" => {
                 let credential = params
-                    .password
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
+                    .credential()
                     .ok_or_else(|| {
-                        "Service account authentication requires a JSON key or file path in Password"
+                        "Service account authentication requires a JSON key or file path"
                             .to_string()
                     })?;
                 let account = if credential.starts_with('{') {
@@ -66,7 +63,7 @@ impl AuthProvider {
                 Ok(Self::Google(Arc::new(account)))
             }
             "authorized_user" => {
-                let credential = read_password_credential(params).await?;
+                let credential = read_json_credential(params).await?;
                 let credentials: AuthorizedUserCredentials = serde_json::from_str(&credential)
                     .map_err(|error| format!("Invalid authorized user credential JSON: {error}"))?;
                 if credentials.credential_type != "authorized_user" {
@@ -93,12 +90,9 @@ impl AuthProvider {
                 })))
             }
             "access_token" => params
-                .password
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .credential()
                 .map(|value| Self::AccessToken(value.to_string()))
-                .ok_or_else(|| "Access token authentication requires a token in Password".to_string()),
+                .ok_or_else(|| "Access token authentication requires a token".to_string()),
             method => Err(format!(
                 "Unsupported authentication method '{method}'. Use adc, service_account, authorized_user, or access_token"
             )),
@@ -169,15 +163,10 @@ impl AuthorizedUserProvider {
     }
 }
 
-async fn read_password_credential(params: &ConnectionParams) -> Result<String, String> {
+async fn read_json_credential(params: &ConnectionParams) -> Result<String, String> {
     let credential = params
-        .password
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            "Authentication requires credential JSON or a file path in Password".to_string()
-        })?;
+        .credential()
+        .ok_or_else(|| "Authentication requires credential JSON or a file path".to_string())?;
     if credential.starts_with('{') {
         Ok(credential.to_string())
     } else {
