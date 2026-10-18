@@ -1,8 +1,18 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/TabularisDB/tabularis/main/public/logo-sm.png" width="120" height="120" alt="Tabularis logo" />
+  <img src="https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/assets/plus.svg" width="40" height="40" alt="plus" />
+  <img src="https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/bigquery-icon.svg" width="120" height="120" alt="Google BigQuery logo" />
 </div>
 
 # tabularis-bigquery-plugin
+
+<p align="center">
+
+![Release](https://img.shields.io/github/v/release/TabularisDB/tabularis-bigquery-plugin?include_prereleases&style=flat)
+![Downloads](https://img.shields.io/github/downloads/TabularisDB/tabularis-bigquery-plugin/total.svg?style=flat)
+![CI](https://github.com/TabularisDB/tabularis-bigquery-plugin/workflows/CI/badge.svg)
+
+</p>
 
 A native Google BigQuery driver for [Tabularis](https://github.com/TabularisDB/tabularis). The plugin is a standalone Rust executable that uses the BigQuery REST API v2 and communicates with Tabularis through newline-delimited JSON-RPC 2.0 over standard input and output.
 
