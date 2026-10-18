@@ -21,7 +21,7 @@ async fn test(id: Value, params: &Value, lightweight: bool) -> Value {
     let result = async {
         let client = client::client_for(&params).await?;
         if lightweight {
-            client.list_datasets().await.map(|_| ())
+            client.ping().await
         } else {
             client
                 .execute_query("SELECT 1 AS connected", None, Some(1), 1)
@@ -38,6 +38,11 @@ async fn test(id: Value, params: &Value, lightweight: bool) -> Value {
 }
 
 pub async fn shutdown(id: Value, _params: &Value) -> Value {
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crate::session::release_all(),
+    )
+    .await;
     client::clear_cache().await;
     ok_response(id, Value::Null)
 }

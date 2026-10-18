@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "mode": "analyze",
+  "job_id": "job_join",
+  "location": "US",
+  "statement_type": "SELECT",
+  "total_bytes_processed": 52428800,
+  "total_bytes_billed": 52428800,
+  "estimated_cost_usd": 0.0002980232238769531,
+  "cost_note": "Estimate at the on-demand list price of $6.25 per TiB.",
+  "cache_hit": false,
+  "total_slot_ms": 1450,
+  "elapsed_ms": 812,
+  "billing_tier": 1,
+  "referenced_tables": ["p.sales.orders", "p.sales.customers"],
+  "query_plan": [
+    {
+      "id": "0", "name": "S00: Input", "status": "COMPLETE",
+      "startMs": "1000", "endMs": "1300", "slotMs": "600",
+      "recordsRead": "100000", "recordsWritten": "2500",
+      "parallelInputs": "4", "completedParallelInputs": "4",
+      "shuffleOutputBytes": "40960", "shuffleOutputBytesSpilled": "0",
+      "waitMsAvg": "2", "readMsAvg": "40", "computeMsAvg": "80", "writeMsAvg": "5",
+      "steps": [
+        {"kind": "READ", "substeps": ["$1:customer_id, $2:amount", "FROM p.sales.orders", "WHERE greater($2, 100)"]},
+        {"kind": "WRITE", "substeps": ["$1, $2", "TO __stage00_output"]}
+      ]
+    },
+    {
+      "id": "1", "name": "S01: Input", "status": "COMPLETE",
+      "startMs": "1000", "endMs": "1200", "slotMs": "300",
+      "recordsRead": "5000", "recordsWritten": "5000",
+      "steps": [
+        {"kind": "READ", "substeps": ["$10:id, $11:name", "FROM p.sales.customers"]},
+        {"kind": "WRITE", "substeps": ["$10, $11", "TO __stage01_output"]}
+      ]
+    },
+    {
+      "id": "2", "name": "S02: Join+", "status": "COMPLETE", "inputStages": ["0", "1"],
+      "startMs": "1300", "endMs": "1700", "slotMs": "500",
+      "recordsRead": "7500", "recordsWritten": "2500",
+      "steps": [
+        {"kind": "READ", "substeps": ["FROM __stage00_output"]},
+        {"kind": "JOIN", "substeps": ["INNER HASH JOIN EACH WITH ALL ON $1 = $10"]},
+        {"kind": "WRITE", "substeps": ["TO __stage02_output"]}
+      ]
+    },
+    {
+      "id": "3", "name": "S03: Output", "status": "COMPLETE", "inputStages": ["2"],
+      "startMs": "1700", "endMs": "1800", "slotMs": "50",
+      "recordsRead": "2500", "recordsWritten": "2500",
+      "steps": [{"kind": "WRITE", "substeps": ["TO __stage03_output"]}]
+    }
+  ],
+  "timeline": []
+}
