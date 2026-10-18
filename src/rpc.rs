@@ -3,11 +3,13 @@ use serde_json::{json, Value};
 use crate::handlers;
 
 pub async fn handle_line(line: &str) -> Value {
-    let request: Value = match serde_json::from_str(line) {
-        Ok(value) => value,
-        Err(error) => return error_response(Value::Null, -32700, &format!("parse error: {error}")),
-    };
+    match serde_json::from_str(line) {
+        Ok(request) => handle_request(request).await,
+        Err(error) => error_response(Value::Null, -32700, &format!("parse error: {error}")),
+    }
+}
 
+pub async fn handle_request(request: Value) -> Value {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return error_response(id, -32600, "invalid JSON-RPC request");
@@ -56,6 +58,7 @@ pub async fn handle_line(line: &str) -> Value {
         "execute_query" => handlers::query::execute_query(id, &params).await,
         "execute_query_batch" => handlers::query::execute_query_batch(id, &params).await,
         "explain_query" => handlers::query::explain_query(id, &params).await,
+        "release_session" => handlers::query::release_session(id, &params).await,
         "insert_record" => handlers::crud::insert_record(id, &params).await,
         "update_record" => handlers::crud::update_record(id, &params).await,
         "delete_record" => handlers::crud::delete_record(id, &params).await,

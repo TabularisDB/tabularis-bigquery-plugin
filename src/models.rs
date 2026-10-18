@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde_json::Value;
 
+/// Stays below the host's default 120 s plugin call timeout, so a timed-out
+/// query is reported and cancelled by the plugin rather than abandoned.
+pub const DEFAULT_TIMEOUT_SECONDS: u64 = 110;
+
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionParams {
     pub driver: Option<String>,
@@ -95,7 +99,15 @@ impl ConnectionParams {
         self.extra_value("query_timeout_seconds")
             .and_then(|value| value.parse::<u64>().ok())
             .map(|value| value.clamp(30, 3_600))
-            .unwrap_or(300)
+            .unwrap_or(DEFAULT_TIMEOUT_SECONDS)
+    }
+
+    pub fn api_endpoint(&self) -> Option<&str> {
+        self.extra_value("api_endpoint")
+    }
+
+    pub fn impersonate_service_account(&self) -> Option<&str> {
+        self.extra_value("impersonate_service_account")
     }
 }
 

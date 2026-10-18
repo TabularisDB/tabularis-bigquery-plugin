@@ -1,7 +1,15 @@
 pub mod auth;
 pub mod bigquery;
+pub mod browse;
+pub mod cancel;
 pub mod client;
+pub mod endpoint;
+pub mod errors;
+pub mod explain;
 pub mod handlers;
 pub mod models;
 pub mod rpc;
+pub mod server;
+pub mod session;
 pub mod sql;
+pub mod statements;
