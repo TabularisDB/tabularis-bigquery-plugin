@@ -1,0 +1,43 @@
+{
+  "kind": "bigquery#table",
+  "id": "my-project-1:sales.orders",
+  "tableReference": {"projectId": "my-project-1", "datasetId": "sales", "tableId": "orders"},
+  "type": "TABLE",
+  "description": "Customer orders",
+  "schema": {
+    "fields": [
+      {"name": "order_id", "type": "INTEGER", "mode": "REQUIRED", "description": "Order key"},
+      {"name": "customer_id", "type": "INTEGER", "mode": "NULLABLE"},
+      {"name": "line_id", "type": "INTEGER", "mode": "REQUIRED"},
+      {"name": "status", "type": "STRING", "mode": "NULLABLE", "maxLength": "16", "defaultValueExpression": "'new'"},
+      {"name": "amount", "type": "NUMERIC", "precision": "12", "scale": "2"},
+      {"name": "placed_at", "type": "TIMESTAMP"},
+      {"name": "location", "type": "GEOGRAPHY"},
+      {"name": "payload", "type": "JSON"},
+      {"name": "validity", "type": "RANGE", "rangeElementType": {"type": "DATE"}},
+      {"name": "items", "type": "RECORD", "mode": "REPEATED", "fields": [
+        {"name": "sku", "type": "STRING", "mode": "REQUIRED"},
+        {"name": "qty", "type": "INTEGER"}
+      ]}
+    ]
+  },
+  "timePartitioning": {"type": "DAY", "field": "placed_at"},
+  "clustering": {"fields": ["customer_id"]},
+  "tableConstraints": {
+    "primaryKey": {"columns": ["order_id", "line_id"]},
+    "foreignKeys": [
+      {
+        "name": "fk_customer",
+        "referencedTable": {"projectId": "my-project-1", "datasetId": "crm", "tableId": "customers"},
+        "columnReferences": [{"referencingColumn": "customer_id", "referencedColumn": "id"}]
+      },
+      {
+        "referencedTable": {"projectId": "my-project-1", "datasetId": "sales", "tableId": "order_lines"},
+        "columnReferences": [
+          {"referencingColumn": "order_id", "referencedColumn": "order_id"},
+          {"referencingColumn": "line_id", "referencedColumn": "line_id"}
+        ]
+      }
+    ]
+  }
+}
