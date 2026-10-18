@@ -43,7 +43,9 @@ impl From<CallError> for String {
 impl BigQueryClient {
     /// Send a REST call with bearer auth. Transient failures (429, 5xx and 403
     /// rate-limit or backend errors, transport errors) are retried with
-    /// exponential backoff and jitter; a 401 refreshes the token once. Every
+    /// exponential backoff and jitter; a 401 drops the cached token (or
+    /// rebuilds a gcp_auth provider) and retries once, which cannot help a
+    /// fixed access token. Every
     /// POST this plugin sends is idempotent (jobs.query carries a requestId),
     /// so retrying is safe.
     pub(crate) async fn call(

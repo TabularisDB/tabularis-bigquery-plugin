@@ -20,14 +20,57 @@ const IAM_CREDENTIALS_BASE: &str = "https://iamcredentials.googleapis.com/v1/";
 type ProviderFuture<'a> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<AuthProvider, String>> + Send + 'a>>;
 
+type GoogleFuture = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<Arc<dyn TokenProvider>, String>> + Send>,
+>;
+/// Builds a fresh gcp_auth provider, so a rejected token is not served again
+/// from the old provider's internal cache.
+type GoogleBuild = Arc<dyn Fn() -> GoogleFuture + Send + Sync>;
+
 #[derive(Clone)]
 pub enum AuthProvider {
-    Google(Arc<dyn TokenProvider>),
+    Google(Arc<GoogleProvider>),
     AuthorizedUser(Arc<AuthorizedUserProvider>),
     Impersonated(Arc<ImpersonatedProvider>),
     AccessToken(String),
     /// No Authorization header; only allowed for loopback emulator endpoints.
     None,
+}
+
+/// A gcp_auth provider (service account key, metadata server, gcloud CLI).
+/// gcp_auth caches tokens internally without a way to drop them, so after a
+/// 401 the provider is rebuilt instead.
+pub struct GoogleProvider {
+    current: Mutex<Arc<dyn TokenProvider>>,
+    build: GoogleBuild,
+}
+
+impl GoogleProvider {
+    async fn new(build: GoogleBuild) -> Result<Self, String> {
+        let current = build().await?;
+        Ok(Self {
+            current: Mutex::new(current),
+            build,
+        })
+    }
+
+    async fn access_token(&self) -> Result<String, String> {
+        let provider = self.current.lock().await.clone();
+        provider
+            .token(BIGQUERY_SCOPES)
+            .await
+            .map(|token| token.as_str().to_string())
+            .map_err(|error| format!("Unable to obtain a Google access token: {error}"))
+    }
+
+    async fn rebuild(&self) {
+        match (self.build)().await {
+            Ok(provider) => *self.current.lock().await = provider,
+            Err(error) => {
+                eprintln!("bigquery-plugin: unable to refresh Google credentials: {error}")
+            }
+        }
+    }
 }
 
 pub struct AuthorizedUserProvider {
@@ -129,11 +172,7 @@ impl AuthProvider {
     /// A bearer token, or `None` when the connection is unauthenticated.
     pub async fn access_token(&self) -> Result<Option<String>, String> {
         match self {
-            Self::Google(provider) => provider
-                .token(BIGQUERY_SCOPES)
-                .await
-                .map(|token| Some(token.as_str().to_string()))
-                .map_err(|error| format!("Unable to obtain a Google access token: {error}")),
+            Self::Google(provider) => provider.access_token().await.map(Some),
             Self::AuthorizedUser(provider) => provider.access_token().await.map(Some),
             Self::Impersonated(provider) => provider.access_token().await.map(Some),
             Self::AccessToken(token) => Ok(Some(token.clone())),
@@ -141,15 +180,18 @@ impl AuthProvider {
         }
     }
 
-    /// Drop cached tokens after the API rejected one with HTTP 401.
+    /// Drop cached tokens after the API rejected one with HTTP 401, so the
+    /// next request fetches a new one. A fixed access token cannot be
+    /// refreshed.
     pub async fn invalidate(&self) {
         match self {
+            Self::Google(provider) => provider.rebuild().await,
             Self::AuthorizedUser(provider) => *provider.cached.lock().await = None,
             Self::Impersonated(provider) => {
                 *provider.cached.lock().await = None;
                 Box::pin(provider.source.invalidate()).await;
             }
-            Self::Google(_) | Self::AccessToken(_) | Self::None => {}
+            Self::AccessToken(_) | Self::None => {}
         }
     }
 }
@@ -323,10 +365,16 @@ async fn application_default() -> Result<AuthProvider, String> {
             .await;
         }
     }
-    gcp_auth::provider()
+    let build: GoogleBuild = Arc::new(|| {
+        Box::pin(async {
+            gcp_auth::provider().await.map_err(|error| {
+                format!("Application Default Credentials are unavailable: {error}")
+            })
+        })
+    });
+    GoogleProvider::new(build)
         .await
-        .map(AuthProvider::Google)
-        .map_err(|error| format!("Application Default Credentials are unavailable: {error}"))
+        .map(|provider| AuthProvider::Google(Arc::new(provider)))
 }
 
 fn adc_file_path() -> Option<PathBuf> {
@@ -367,9 +415,18 @@ fn from_credential_json<'a>(text: &'a str, allowed: &'a [&'a str]) -> ProviderFu
         match credential_type.as_str() {
             "service_account" => {
                 validate_token_uri(&value)?;
-                CustomServiceAccount::from_json(text)
-                    .map(|account| AuthProvider::Google(Arc::new(account)))
-                    .map_err(|error| format!("Invalid service account credential: {error}"))
+                let key: Arc<str> = Arc::from(text);
+                let build: GoogleBuild = Arc::new(move || {
+                    let key = key.clone();
+                    Box::pin(async move {
+                        CustomServiceAccount::from_json(&key)
+                            .map(|account| Arc::new(account) as Arc<dyn TokenProvider>)
+                            .map_err(|error| format!("Invalid service account credential: {error}"))
+                    })
+                });
+                GoogleProvider::new(build)
+                    .await
+                    .map(|provider| AuthProvider::Google(Arc::new(provider)))
             }
             "authorized_user" => {
                 let credentials: AuthorizedUserCredentials = serde_json::from_value(value)
@@ -497,13 +554,16 @@ async fn load_json_credential(credential: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
     use serde_json::json;
     use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::{
         from_credential_json, impersonation_url_for, load_json_credential, validate_token_uri,
-        AuthProvider, ImpersonatedProvider,
+        AuthProvider, GoogleBuild, GoogleProvider, ImpersonatedProvider,
     };
     use crate::endpoint;
     use crate::models::ConnectionParams;
@@ -615,6 +675,53 @@ mod tests {
         assert_eq!(provider.access_token().await.unwrap(), "impersonated-token");
         // The second call is served from the cache; `expect(1)` verifies it.
         assert_eq!(provider.access_token().await.unwrap(), "impersonated-token");
+    }
+
+    struct FixedToken(&'static str);
+
+    #[async_trait::async_trait]
+    impl gcp_auth::TokenProvider for FixedToken {
+        async fn token(&self, _scopes: &[&str]) -> Result<Arc<gcp_auth::Token>, gcp_auth::Error> {
+            Ok(Arc::new(
+                serde_json::from_value(json!({"access_token": self.0, "expires_in": 3600}))
+                    .unwrap(),
+            ))
+        }
+
+        async fn project_id(&self) -> Result<Arc<str>, gcp_auth::Error> {
+            Ok(Arc::from("p"))
+        }
+    }
+
+    #[tokio::test]
+    async fn invalidating_google_credentials_rebuilds_the_provider() {
+        let builds = Arc::new(AtomicUsize::new(0));
+        let counter = builds.clone();
+        let build: GoogleBuild = Arc::new(move || {
+            let token = if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                "first"
+            } else {
+                "second"
+            };
+            Box::pin(
+                async move { Ok(Arc::new(FixedToken(token)) as Arc<dyn gcp_auth::TokenProvider>) },
+            )
+        });
+        let provider = AuthProvider::Google(Arc::new(GoogleProvider::new(build).await.unwrap()));
+        assert_eq!(
+            provider.access_token().await.unwrap().as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            provider.access_token().await.unwrap().as_deref(),
+            Some("first")
+        );
+        provider.invalidate().await;
+        assert_eq!(
+            provider.access_token().await.unwrap().as_deref(),
+            Some("second")
+        );
+        assert_eq!(builds.load(Ordering::SeqCst), 2);
     }
 
     #[test]
