@@ -1,0 +1,8 @@
+# Own workspace root so pnpm 9 installs this package alone; the build
+# allowlist lets pnpm 10 and later run the esbuild install script.
+packages:
+  - .
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild
