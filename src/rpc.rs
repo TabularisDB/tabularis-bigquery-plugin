@@ -3,11 +3,13 @@ use serde_json::{json, Value};
 use crate::handlers;
 
 pub async fn handle_line(line: &str) -> Value {
-    let request: Value = match serde_json::from_str(line) {
-        Ok(value) => value,
-        Err(error) => return error_response(Value::Null, -32700, &format!("parse error: {error}")),
-    };
+    match serde_json::from_str(line) {
+        Ok(request) => handle_request(request).await,
+        Err(error) => error_response(Value::Null, -32700, &format!("parse error: {error}")),
+    }
+}
 
+pub async fn handle_request(request: Value) -> Value {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return error_response(id, -32600, "invalid JSON-RPC request");
@@ -44,9 +46,14 @@ pub async fn handle_line(line: &str) -> Value {
         "refresh_materialized_view" => {
             handlers::metadata::refresh_materialized_view(id, &params).await
         }
-        "get_routines" => handlers::metadata::get_routines(id, &params).await,
-        "get_routine_parameters" => handlers::metadata::get_routine_parameters(id, &params).await,
-        "get_routine_definition" => handlers::metadata::get_routine_definition(id, &params).await,
+        "get_routines" => handlers::routines::get_routines(id, &params).await,
+        "get_routine_parameters" => handlers::routines::get_routine_parameters(id, &params).await,
+        "get_routine_definition" => handlers::routines::get_routine_definition(id, &params).await,
+        "get_routine_edit_script" => handlers::routines::get_routine_edit_script(id, &params).await,
+        "build_routine_call_sql" => handlers::routines::build_routine_call_sql(id, &params).await,
+        "routine_create_template" => handlers::routines::routine_create_template(id, &params).await,
+        "drop_routine" => handlers::routines::drop_routine(id, &params).await,
+        "get_table_ddl" => handlers::metadata::get_table_ddl(id, &params).await,
         "get_schema_snapshot" => handlers::metadata::get_schema_snapshot(id, &params).await,
         "get_all_columns_batch" => handlers::metadata::get_all_columns_batch(id, &params).await,
         "get_all_foreign_keys_batch" => {
@@ -56,6 +63,7 @@ pub async fn handle_line(line: &str) -> Value {
         "execute_query" => handlers::query::execute_query(id, &params).await,
         "execute_query_batch" => handlers::query::execute_query_batch(id, &params).await,
         "explain_query" => handlers::query::explain_query(id, &params).await,
+        "release_session" => handlers::query::release_session(id, &params).await,
         "insert_record" => handlers::crud::insert_record(id, &params).await,
         "update_record" => handlers::crud::update_record(id, &params).await,
         "delete_record" => handlers::crud::delete_record(id, &params).await,
@@ -66,6 +74,7 @@ pub async fn handle_line(line: &str) -> Value {
         "get_create_foreign_key_sql" => {
             handlers::ddl::get_create_foreign_key_sql(id, &params).await
         }
+        "get_drop_table_sql" => handlers::ddl::get_drop_table_sql(id, &params).await,
         "drop_index" => handlers::ddl::drop_index(id, &params).await,
         "drop_foreign_key" => handlers::ddl::drop_foreign_key(id, &params).await,
         "save_blob_to_file" => handlers::blob::save_blob_to_file(id, &params).await,

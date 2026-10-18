@@ -62,6 +62,26 @@ export const styles = {
     fontSize: "11px",
     padding: 0,
   } as CSSProperties,
+  warning: {
+    color: "var(--color-text-danger, #f87171)",
+    fontSize: "11px",
+    lineHeight: 1.5,
+    margin: "-6px 0 0",
+  } as CSSProperties,
+  details: {
+    border: "1px solid var(--color-border-strong, #475569)",
+    borderRadius: "8px",
+    padding: "8px 12px",
+  } as CSSProperties,
+  summary: {
+    color: "var(--color-text-muted, #94a3b8)",
+    cursor: "pointer",
+    fontSize: "11px",
+    fontWeight: 600,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    marginBottom: "4px",
+  } as CSSProperties,
   grid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",

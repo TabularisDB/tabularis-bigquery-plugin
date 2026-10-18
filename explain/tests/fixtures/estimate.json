@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "mode": "estimate",
+  "job_id": null,
+  "location": "EU",
+  "statement_type": "SELECT",
+  "total_bytes_processed": 1099511627776,
+  "total_bytes_processed_accuracy": "PRECISE",
+  "total_bytes_billed": null,
+  "estimated_cost_usd": 6.25,
+  "cost_note": "Estimate at the on-demand list price of $6.25 per TiB.",
+  "cache_hit": false,
+  "total_slot_ms": null,
+  "elapsed_ms": null,
+  "billing_tier": null,
+  "referenced_tables": ["p.sales.orders"],
+  "query_plan": [],
+  "timeline": []
+}

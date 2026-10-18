@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde_json::Value;
 
+/// Stays below the host's default 120 s plugin call timeout, so a timed-out
+/// query is reported and cancelled by the plugin rather than abandoned.
+pub const DEFAULT_TIMEOUT_SECONDS: u64 = 110;
+
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionParams {
     pub driver: Option<String>,
@@ -62,6 +66,37 @@ impl ConnectionParams {
             .ok_or_else(|| "Project ID is required in the Database field".to_string())
     }
 
+    /// Project that owns and pays for query jobs. Multi-project browsing
+    /// sends the selected project in `database`, so an explicit
+    /// `billing_project` extra keeps jobs in the configured project.
+    pub fn billing_project_id(&self) -> Result<&str, String> {
+        match self.extra_value("billing_project") {
+            Some(project) => Ok(project),
+            None => self.project_id(),
+        }
+    }
+
+    /// Project whose datasets are browsed: the selected database, or the
+    /// billing project when the host sends no database ("all databases").
+    pub fn data_project_id(&self) -> Result<&str, String> {
+        self.project_id().or_else(|_| self.billing_project_id())
+    }
+
+    /// Projects listed by `get_databases` in addition to the projects the
+    /// credential can see, e.g. `bigquery-public-data`.
+    pub fn additional_projects(&self) -> Vec<String> {
+        self.extra_value("additional_projects")
+            .map(|value| {
+                value
+                    .split([',', '\n', ' '])
+                    .map(str::trim)
+                    .filter(|project| !project.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn extra_value(&self, key: &str) -> Option<&str> {
         self.extra
             .get(key)
@@ -95,12 +130,32 @@ impl ConnectionParams {
         self.extra_value("query_timeout_seconds")
             .and_then(|value| value.parse::<u64>().ok())
             .map(|value| value.clamp(30, 3_600))
-            .unwrap_or(300)
+            .unwrap_or(DEFAULT_TIMEOUT_SECONDS)
+    }
+
+    pub fn api_endpoint(&self) -> Option<&str> {
+        self.extra_value("api_endpoint")
+    }
+
+    pub fn impersonate_service_account(&self) -> Option<&str> {
+        self.extra_value("impersonate_service_account")
     }
 }
 
 pub fn inner_params(value: &Value) -> &Value {
     value.get("params").unwrap_or(value)
+}
+
+/// Data project for generated SQL. Current hosts send the connection
+/// parameters, with the browsed project applied, to every SQL builder; older
+/// hosts send none, and the statements are then dataset-qualified and resolve
+/// in the job project.
+pub fn optional_data_project(request: &Value) -> Option<String> {
+    request.get("params")?;
+    ConnectionParams::from_value(inner_params(request))
+        .data_project_id()
+        .ok()
+        .map(str::to_owned)
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -114,6 +169,11 @@ pub struct ColumnDefinition {
     pub is_auto_increment: bool,
     #[serde(default)]
     pub default_value: Option<String>,
+    /// Column description. Hosts send it only when the user entered one
+    /// (manifest capability `column_comments`); the DDL builders emit it as
+    /// `OPTIONS(description = ...)`.
+    #[serde(default, alias = "description")]
+    pub comment: Option<String>,
 }
 
 #[cfg(test)]
@@ -133,6 +193,24 @@ mod tests {
         assert_eq!(params.project_id().unwrap(), "billing-project");
         assert_eq!(params.auth_method(), "adc");
         assert!(!params.extra.contains_key("ignored"));
+    }
+
+    #[test]
+    fn billing_project_defaults_to_database_and_honors_override() {
+        let value = json!({"database": "public-data"});
+        let params = ConnectionParams::from_value(&value);
+        assert_eq!(params.billing_project_id().unwrap(), "public-data");
+        let value = json!({
+            "database": "bigquery-public-data",
+            "extra": {"billing_project": "my-billing", "additional_projects": "a-1, b-2\nc"}
+        });
+        let params = ConnectionParams::from_value(&value);
+        assert_eq!(params.project_id().unwrap(), "bigquery-public-data");
+        assert_eq!(params.billing_project_id().unwrap(), "my-billing");
+        assert_eq!(params.additional_projects(), vec!["a-1", "b-2", "c"]);
+        let value = json!({"database": "", "extra": {"billing_project": "my-billing"}});
+        let params = ConnectionParams::from_value(&value);
+        assert_eq!(params.data_project_id().unwrap(), "my-billing");
     }
 
     #[test]

@@ -2,36 +2,47 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use reqwest::{Method, StatusCode, Url};
+use reqwest::Url;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Instant};
 
 use crate::auth::AuthProvider;
-use crate::bigquery::{
-    api_error, fields_from_response, rows_from_response, FieldSchema, QueryOutput,
-};
+use crate::bigquery::{FieldSchema, QueryOutput};
 use crate::models::ConnectionParams;
 
-const API_BASE: &str = "https://bigquery.googleapis.com/bigquery/v2/";
+mod jobs;
+mod tabledata;
+mod transport;
+
+pub use jobs::{JobRef, QueryRequest};
+
 const DEFAULT_PAGE_SIZE: u32 = 10_000;
 
 static CLIENTS: OnceLock<Mutex<HashMap<String, Arc<BigQueryClient>>>> = OnceLock::new();
 
+#[derive(Clone)]
 pub struct BigQueryClient {
     http: reqwest::Client,
     auth: AuthProvider,
+    /// Project that runs and bills query jobs (the billing project).
     pub project_id: String,
+    /// Project of unqualified names and of table browsing (the selected
+    /// database, falling back to the billing project).
+    data_project: String,
     location: Option<String>,
     max_bytes_billed: Option<String>,
     timeout: Duration,
+    api_base: Url,
+    /// Fingerprint of the connection settings, used to scope cached results.
+    key: String,
 }
 
 impl BigQueryClient {
     async fn new(params: &ConnectionParams) -> Result<Self, String> {
         let timeout = Duration::from_secs(params.timeout_seconds());
-        let project_id = params.project_id()?.to_string();
+        let project_id = params.billing_project_id()?.to_string();
+        let data_project = params.data_project_id()?.to_string();
         let max_bytes_billed = params
             .max_bytes_billed()
             .map(|value| {
@@ -50,144 +61,27 @@ impl BigQueryClient {
             ))
             .build()
             .map_err(|error| format!("Unable to initialize the HTTP client: {error}"))?;
+        let endpoint = crate::endpoint::resolve(params.api_endpoint())?;
         Ok(Self {
             http,
-            auth: AuthProvider::from_params(params).await?,
+            auth: AuthProvider::from_params(params, &endpoint).await?,
             project_id,
+            data_project,
             location: params.location().map(str::to_owned),
             max_bytes_billed,
             timeout,
+            api_base: endpoint.base,
+            key: cache_key(params),
         })
     }
 
     fn url(&self, segments: &[&str]) -> Result<Url, String> {
-        let mut url = Url::parse(API_BASE).map_err(|error| error.to_string())?;
+        let mut url = self.api_base.clone();
         url.path_segments_mut()
             .map_err(|_| "Invalid BigQuery API base URL".to_string())?
+            .pop_if_empty()
             .extend(segments);
         Ok(url)
-    }
-
-    async fn request_json(
-        &self,
-        method: Method,
-        url: Url,
-        query: &[(String, String)],
-        body: Option<&Value>,
-    ) -> Result<Value, String> {
-        let mut last_error = String::new();
-        for attempt in 0..4u32 {
-            let token = self.auth.access_token().await?;
-            let mut request = self
-                .http
-                .request(method.clone(), url.clone())
-                .bearer_auth(token)
-                .query(query);
-            if let Some(body) = body {
-                request = request.json(body);
-            }
-
-            match request.send().await {
-                Ok(response) => {
-                    let status = response.status();
-                    let text = response.text().await.map_err(|error| {
-                        format!("Unable to read the BigQuery response: {error}")
-                    })?;
-                    let payload: Value =
-                        serde_json::from_str(&text).unwrap_or_else(|_| json!({"raw": text}));
-                    if status.is_success() {
-                        return Ok(payload);
-                    }
-                    let message = api_error(&payload).unwrap_or_else(|| format!("HTTP {status}"));
-                    last_error = format!("BigQuery API request failed ({status}): {message}");
-                    if !is_retryable(status) || attempt == 3 {
-                        return Err(last_error);
-                    }
-                }
-                Err(error) => {
-                    last_error = format!("BigQuery API request failed: {error}");
-                    if attempt == 3 {
-                        return Err(last_error);
-                    }
-                }
-            }
-            sleep(Duration::from_millis(250 * 2u64.pow(attempt))).await;
-        }
-        Err(last_error)
-    }
-
-    pub async fn list_datasets(&self) -> Result<Vec<String>, String> {
-        let url = self.url(&["projects", &self.project_id, "datasets"])?;
-        let mut page_token: Option<String> = None;
-        let mut datasets = Vec::new();
-        loop {
-            let mut query = vec![("maxResults".to_string(), "1000".to_string())];
-            if let Some(token) = &page_token {
-                query.push(("pageToken".to_string(), token.clone()));
-            }
-            let response = self
-                .request_json(Method::GET, url.clone(), &query, None)
-                .await?;
-            if let Some(entries) = response.get("datasets").and_then(Value::as_array) {
-                datasets.extend(entries.iter().filter_map(|entry| {
-                    entry
-                        .pointer("/datasetReference/datasetId")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                }));
-            }
-            page_token = response
-                .get("nextPageToken")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if page_token.is_none() {
-                break;
-            }
-        }
-        datasets.sort();
-        Ok(datasets)
-    }
-
-    pub async fn list_tables(&self, dataset: &str) -> Result<Vec<Value>, String> {
-        let url = self.url(&["projects", &self.project_id, "datasets", dataset, "tables"])?;
-        let mut page_token: Option<String> = None;
-        let mut tables = Vec::new();
-        loop {
-            let mut query = vec![("maxResults".to_string(), "1000".to_string())];
-            if let Some(token) = &page_token {
-                query.push(("pageToken".to_string(), token.clone()));
-            }
-            let response = self
-                .request_json(Method::GET, url.clone(), &query, None)
-                .await?;
-            tables.extend(
-                response
-                    .get("tables")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default(),
-            );
-            page_token = response
-                .get("nextPageToken")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if page_token.is_none() {
-                break;
-            }
-        }
-        Ok(tables)
-    }
-
-    pub async fn get_table(&self, dataset: &str, table: &str) -> Result<Value, String> {
-        let url = self.url(&[
-            "projects",
-            &self.project_id,
-            "datasets",
-            dataset,
-            "tables",
-            table,
-        ])?;
-        self.request_json(Method::GET, url, &[], None).await
     }
 
     pub async fn execute_query(
@@ -197,180 +91,40 @@ impl BigQueryClient {
         limit: Option<u32>,
         page: u32,
     ) -> Result<QueryOutput, String> {
-        self.run_query(sql, dataset, limit, page, false).await
-    }
-
-    pub async fn dry_run(&self, sql: &str, dataset: Option<&str>) -> Result<Value, String> {
-        let output = self.run_query(sql, dataset, Some(0), 1, true).await?;
-        Ok(json!({
-            "kind": "bigquery_dry_run",
-            "total_bytes_processed": output.total_bytes_processed,
-            "job_id": output.job_id
-        }))
-    }
-
-    async fn run_query(
-        &self,
-        sql: &str,
-        dataset: Option<&str>,
-        limit: Option<u32>,
-        page: u32,
-        dry_run: bool,
-    ) -> Result<QueryOutput, String> {
-        if sql.trim().is_empty() {
-            return Err("Query must not be empty".to_string());
-        }
-        let url = self.url(&["projects", &self.project_id, "queries"])?;
-        let requested_size = limit.unwrap_or(DEFAULT_PAGE_SIZE);
-        let initial_timeout_ms = self.timeout.as_millis().min(120_000) as u64;
-        let mut body = json!({
-            "query": sql,
-            "useLegacySql": false,
-            "timeoutMs": initial_timeout_ms,
-            "maxResults": if dry_run { 0 } else { requested_size.saturating_add(1) },
-            "dryRun": dry_run
-        });
-        if let Some(location) = &self.location {
-            body["location"] = Value::String(location.clone());
-        }
-        if let Some(maximum) = &self.max_bytes_billed {
-            body["maximumBytesBilled"] = Value::String(maximum.clone());
-        }
-        if let Some(dataset) = dataset.filter(|value| !value.is_empty()) {
-            body["defaultDataset"] = json!({"projectId": self.project_id, "datasetId": dataset});
-        }
-
-        let initial = self
-            .request_json(Method::POST, url, &[], Some(&body))
-            .await?;
-        if let Some(error) = api_error(&initial) {
-            return Err(error);
-        }
-        let job_id = initial
-            .pointer("/jobReference/jobId")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        if dry_run {
-            return Ok(output_from_response(initial, requested_size, job_id));
-        }
-
-        let job_id = job_id.ok_or_else(|| "BigQuery did not return a query job ID".to_string())?;
-        let location = initial
-            .pointer("/jobReference/location")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .or_else(|| self.location.clone());
-        let offset = u64::from(page.saturating_sub(1)) * u64::from(requested_size);
-        let final_response = self
-            .wait_for_results(
-                &job_id,
-                location.as_deref(),
-                offset,
-                requested_size.saturating_add(1),
-            )
-            .await?;
-        let mut output = output_from_response(final_response, requested_size, Some(job_id));
-        if output.rows.len() > requested_size as usize {
-            output.rows.truncate(requested_size as usize);
-            output.has_more = true;
-        }
-        if let Some(total) = output.total_rows {
-            output.has_more = offset.saturating_add(output.rows.len() as u64) < total;
-        }
-        Ok(output)
-    }
-
-    async fn wait_for_results(
-        &self,
-        job_id: &str,
-        location: Option<&str>,
-        start_index: u64,
-        max_results: u32,
-    ) -> Result<Value, String> {
-        let url = self.url(&["projects", &self.project_id, "queries", job_id])?;
-        let started = Instant::now();
-        loop {
-            let mut query = vec![
-                ("timeoutMs".to_string(), "10000".to_string()),
-                ("startIndex".to_string(), start_index.to_string()),
-                ("maxResults".to_string(), max_results.to_string()),
-            ];
-            if let Some(location) = location {
-                query.push(("location".to_string(), location.to_string()));
-            }
-            let response = self
-                .request_json(Method::GET, url.clone(), &query, None)
-                .await?;
-            if let Some(error) = api_error(&response) {
-                return Err(error);
-            }
-            if response
-                .get("jobComplete")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                return Ok(response);
-            }
-            if started.elapsed() >= self.timeout {
-                return Err(format!(
-                    "BigQuery query timed out after {} seconds",
-                    self.timeout.as_secs()
-                ));
-            }
-            sleep(Duration::from_millis(250)).await;
-        }
+        self.run_query(
+            &QueryRequest {
+                sql,
+                dataset,
+                page_size: limit.unwrap_or(DEFAULT_PAGE_SIZE),
+                page: page.max(1),
+                fetch_rows: true,
+                ..QueryRequest::default()
+            },
+            None,
+        )
+        .await
     }
 }
 
-fn output_from_response(response: Value, page_size: u32, job_id: Option<String>) -> QueryOutput {
-    let fields = fields_from_response(&response).unwrap_or_default();
-    let columns = fields.iter().map(|field| field.name.clone()).collect();
-    let rows = rows_from_response(&response, &fields);
-    let affected_rows = response
-        .get("numDmlAffectedRows")
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse().ok())
-        .unwrap_or_default();
-    let total_rows = response
-        .get("totalRows")
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse().ok());
-    let has_more = response.get("pageToken").is_some() || rows.len() > page_size as usize;
-    QueryOutput {
-        columns,
-        fields,
-        rows,
-        affected_rows,
-        total_rows,
-        has_more,
-        total_bytes_processed: response
-            .get("totalBytesProcessed")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        cache_hit: response.get("cacheHit").and_then(Value::as_bool),
-        job_id,
-    }
-}
-
-fn is_retryable(status: StatusCode) -> bool {
-    status == StatusCode::TOO_MANY_REQUESTS
-        || status == StatusCode::INTERNAL_SERVER_ERROR
-        || status == StatusCode::BAD_GATEWAY
-        || status == StatusCode::SERVICE_UNAVAILABLE
-        || status == StatusCode::GATEWAY_TIMEOUT
-}
-
+/// Every setting that changes how the client talks to BigQuery must be part
+/// of the key, or an edited connection would keep using a stale client.
 fn cache_key(params: &ConnectionParams) -> String {
+    let timeout = params.timeout_seconds().to_string();
     let mut hasher = Sha256::new();
-    hasher.update(params.project_id.as_deref().unwrap_or_default());
-    hasher.update([0]);
-    hasher.update(params.auth_method());
-    hasher.update([0]);
-    hasher.update(params.password.as_deref().unwrap_or_default());
-    hasher.update([0]);
-    hasher.update(params.location().unwrap_or_default());
-    hasher.update([0]);
-    hasher.update(params.max_bytes_billed().unwrap_or_default());
+    for part in [
+        params.billing_project_id().unwrap_or_default(),
+        params.data_project_id().unwrap_or_default(),
+        params.auth_method(),
+        params.credential().unwrap_or_default(),
+        params.location().unwrap_or_default(),
+        params.max_bytes_billed().unwrap_or_default(),
+        timeout.as_str(),
+        params.api_endpoint().unwrap_or_default(),
+        params.impersonate_service_account().unwrap_or_default(),
+    ] {
+        hasher.update(part);
+        hasher.update([0]);
+    }
     format!("{:x}", hasher.finalize())
 }
 
@@ -403,4 +157,246 @@ pub fn table_fields(table: &Value) -> Result<Vec<FieldSchema>, String> {
         .unwrap_or_else(|| json!([]));
     serde_json::from_value(fields)
         .map_err(|error| format!("Invalid BigQuery table schema: {error}"))
+}
+
+// ---------------------------------------------------------------------------
+// Catalog REST calls and parameterized statements used by the metadata, DDL,
+// CRUD and routine handlers. Every call takes the target project explicitly so
+// multi-project browsing never depends on the billing project.
+
+/// One GoogleSQL statement or script with optional named query parameters.
+#[derive(Debug, Clone, Default)]
+pub struct Statement {
+    pub sql: String,
+    /// Complete `QueryParameter` resources (`name`, `parameterType`,
+    /// `parameterValue`). Non-empty switches the job to named parameters.
+    pub parameters: Vec<Value>,
+    /// `(project, dataset)` used to resolve unqualified names.
+    pub default_dataset: Option<(String, String)>,
+    /// Overrides the connection location, e.g. with the dataset location.
+    pub location: Option<String>,
+    /// Rows to return; 0 runs the statement for its side effects only.
+    pub max_results: u32,
+}
+
+impl Statement {
+    pub fn new(sql: impl Into<String>) -> Self {
+        Self {
+            sql: sql.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_parameters(mut self, parameters: Vec<Value>) -> Self {
+        self.parameters = parameters;
+        self
+    }
+
+    pub fn in_dataset(mut self, project: &str, dataset: &str) -> Self {
+        self.default_dataset = Some((project.to_string(), dataset.to_string()));
+        self
+    }
+
+    pub fn at_location(mut self, location: Option<String>) -> Self {
+        self.location = location;
+        self
+    }
+
+    pub fn returning(mut self, max_results: u32) -> Self {
+        self.max_results = max_results;
+        self
+    }
+
+    /// The job request for this statement, run through the same job path as
+    /// user queries (requestId, retries, jobTimeoutMs, labels, cancellation).
+    pub fn request(&self) -> QueryRequest<'_> {
+        let (project, dataset) = match &self.default_dataset {
+            Some((project, dataset)) => (Some(project.as_str()), Some(dataset.as_str())),
+            None => (None, None),
+        };
+        QueryRequest {
+            sql: &self.sql,
+            dataset,
+            project,
+            location: self.location.as_deref(),
+            parameters: &self.parameters,
+            page_size: self.max_results,
+            page: 1,
+            fetch_rows: self.max_results > 0,
+        }
+    }
+}
+
+impl BigQueryClient {
+    async fn list_paged(&self, segments: &[&str], key: &str) -> Result<Vec<Value>, String> {
+        let mut page_token: Option<String> = None;
+        let mut items = Vec::new();
+        loop {
+            let mut query = vec![("maxResults".to_string(), "1000".to_string())];
+            if let Some(token) = &page_token {
+                query.push(("pageToken".to_string(), token.clone()));
+            }
+            let response = self.get(segments, &query).await.map_err(String::from)?;
+            items.extend(
+                response
+                    .get(key)
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+            page_token = response
+                .get("nextPageToken")
+                .and_then(Value::as_str)
+                .filter(|token| !token.is_empty())
+                .map(str::to_owned);
+            if page_token.is_none() {
+                return Ok(items);
+            }
+        }
+    }
+
+    /// Projects visible to the credential (`GET projects`).
+    pub async fn list_projects(&self) -> Result<Vec<String>, String> {
+        let projects = self.list_paged(&["projects"], "projects").await?;
+        Ok(projects
+            .iter()
+            .filter_map(|project| {
+                project
+                    .pointer("/projectReference/projectId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect())
+    }
+
+    pub async fn list_datasets_in(&self, project: &str) -> Result<Vec<String>, String> {
+        let datasets = self
+            .list_paged(&["projects", project, "datasets"], "datasets")
+            .await?;
+        let mut names = datasets
+            .iter()
+            .filter_map(|dataset| {
+                dataset
+                    .pointer("/datasetReference/datasetId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        Ok(names)
+    }
+
+    pub async fn get_dataset(&self, project: &str, dataset: &str) -> Result<Value, String> {
+        self.get(&["projects", project, "datasets", dataset], &[])
+            .await
+            .map_err(String::from)
+    }
+
+    pub async fn list_tables_in(&self, project: &str, dataset: &str) -> Result<Vec<Value>, String> {
+        self.list_paged(
+            &["projects", project, "datasets", dataset, "tables"],
+            "tables",
+        )
+        .await
+    }
+
+    pub async fn get_table_in(
+        &self,
+        project: &str,
+        dataset: &str,
+        table: &str,
+    ) -> Result<Value, String> {
+        self.get(
+            &["projects", project, "datasets", dataset, "tables", table],
+            &[],
+        )
+        .await
+        .map_err(String::from)
+    }
+
+    pub async fn list_routines(&self, project: &str, dataset: &str) -> Result<Vec<Value>, String> {
+        self.list_paged(
+            &["projects", project, "datasets", dataset, "routines"],
+            "routines",
+        )
+        .await
+    }
+
+    pub async fn get_routine(
+        &self,
+        project: &str,
+        dataset: &str,
+        routine: &str,
+    ) -> Result<Value, String> {
+        self.get(
+            &[
+                "projects", project, "datasets", dataset, "routines", routine,
+            ],
+            &[],
+        )
+        .await
+        .map_err(String::from)
+    }
+
+    /// Runs a statement in the billing project, with optional named
+    /// parameters, and waits for it to finish. Uses the query job runtime,
+    /// so it is retried, labelled, bounded by the query timeout and
+    /// cancellable like any user query.
+    pub async fn run_statement(&self, statement: &Statement) -> Result<QueryOutput, String> {
+        self.run_query(&statement.request(), None).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{cache_key, Statement};
+    use crate::models::ConnectionParams;
+
+    fn key(extra: serde_json::Value) -> String {
+        cache_key(&ConnectionParams::from_value(
+            &json!({"database": "p", "password": "legacy", "extra": extra}),
+        ))
+    }
+
+    #[test]
+    fn cache_key_tracks_every_client_setting() {
+        let base = key(json!({"credential": "a"}));
+        assert_ne!(base, key(json!({"credential": "b"})));
+        for (field, value) in [
+            ("query_timeout_seconds", "600"),
+            ("location", "EU"),
+            ("max_bytes_billed", "1000"),
+            ("api_endpoint", "http://localhost:9050"),
+            (
+                "impersonate_service_account",
+                "sa@p.iam.gserviceaccount.com",
+            ),
+            ("auth_method", "access_token"),
+            ("billing_project", "billing"),
+        ] {
+            let mut extra = json!({"credential": "a"});
+            extra[field] = json!(value);
+            assert_ne!(base, key(extra), "{field}");
+        }
+    }
+
+    #[test]
+    fn statement_request_carries_dataset_location_and_parameters() {
+        let parameter = json!({"name": "id", "parameterType": {"type": "INT64"}, "parameterValue": {"value": "1"}});
+        let statement = Statement::new("SELECT @id")
+            .with_parameters(vec![parameter.clone()])
+            .in_dataset("data", "ds")
+            .at_location(Some("EU".into()))
+            .returning(5);
+        let request = statement.request();
+        assert_eq!(request.project, Some("data"));
+        assert_eq!(request.dataset, Some("ds"));
+        assert_eq!(request.location, Some("EU"));
+        assert_eq!(request.parameters, &[parameter]);
+        assert_eq!(request.page_size, 5);
+        assert!(request.fetch_rows);
+        assert!(!Statement::new("DROP TABLE t").request().fetch_rows);
+    }
 }

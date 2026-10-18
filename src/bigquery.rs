@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 
 const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldSchema {
     pub name: String,
@@ -19,6 +19,20 @@ pub struct FieldSchema {
     pub fields: Vec<FieldSchema>,
     #[serde(default)]
     pub default_value_expression: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_element_type: Option<RangeElementType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct RangeElementType {
+    #[serde(rename = "type")]
+    pub element_type: String,
 }
 
 impl FieldSchema {
@@ -54,6 +68,8 @@ pub struct QueryOutput {
     pub total_bytes_processed: Option<String>,
     pub cache_hit: Option<bool>,
     pub job_id: Option<String>,
+    /// How the rows were read, for example `job` or `tabledata.list`.
+    pub source: Option<String>,
 }
 
 impl QueryOutput {
@@ -72,7 +88,8 @@ impl QueryOutput {
             "metadata": {
                 "total_bytes_processed": self.total_bytes_processed,
                 "cache_hit": self.cache_hit,
-                "job_id": self.job_id
+                "job_id": self.job_id,
+                "source": self.source
             }
         })
     }
@@ -181,8 +198,7 @@ fn convert_scalar_or_record(value: &Value, field: &FieldSchema) -> Value {
             .unwrap_or_else(|| value.clone()),
         "TIMESTAMP" => value
             .as_str()
-            .and_then(|value| value.parse::<f64>().ok())
-            .and_then(epoch_to_rfc3339)
+            .and_then(timestamp_to_rfc3339)
             .map(Value::String)
             .unwrap_or_else(|| value.clone()),
         "BYTES" => value
@@ -199,10 +215,40 @@ fn convert_scalar_or_record(value: &Value, field: &FieldSchema) -> Value {
     }
 }
 
-fn epoch_to_rfc3339(epoch: f64) -> Option<String> {
-    let seconds = epoch.floor() as i64;
-    let nanos = ((epoch - seconds as f64) * 1_000_000_000.0).round() as u32;
-    DateTime::<Utc>::from_timestamp(seconds, nanos)
+/// Format a wire TIMESTAMP exactly. Results requested with
+/// `formatOptions.useInt64Timestamp` carry integer microseconds; older
+/// responses carry decimal or scientific epoch seconds.
+pub fn timestamp_to_rfc3339(value: &str) -> Option<String> {
+    let value = value.trim();
+    let micros = if let Ok(micros) = value.parse::<i64>() {
+        micros
+    } else if value.contains(['e', 'E']) {
+        (value.parse::<f64>().ok()? * 1_000_000.0).round() as i64
+    } else {
+        let (negative, digits) = match value.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, value),
+        };
+        let (seconds, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+        let mut fraction = fraction.to_string();
+        if fraction.len() > 6 || !fraction.chars().all(|digit| digit.is_ascii_digit()) {
+            return None;
+        }
+        while fraction.len() < 6 {
+            fraction.push('0');
+        }
+        let micros = seconds
+            .parse::<i64>()
+            .ok()?
+            .checked_mul(1_000_000)?
+            .checked_add(fraction.parse::<i64>().ok()?)?;
+        if negative {
+            -micros
+        } else {
+            micros
+        }
+    };
+    DateTime::<Utc>::from_timestamp_micros(micros)
         .map(|date| date.to_rfc3339_opts(SecondsFormat::Micros, true))
 }
 
@@ -231,7 +277,35 @@ pub fn api_error(response: &Value) -> Option<String> {
 mod tests {
     use serde_json::json;
 
-    use super::{fields_from_response, rows_from_response, FieldSchema};
+    use super::{fields_from_response, rows_from_response, timestamp_to_rfc3339, FieldSchema};
+
+    #[test]
+    fn formats_timestamps_with_exact_microseconds() {
+        assert_eq!(
+            timestamp_to_rfc3339("1700000000123457").unwrap(),
+            "2023-11-14T22:13:20.123457Z"
+        );
+        assert_eq!(
+            timestamp_to_rfc3339("1700000000.123457").unwrap(),
+            "2023-11-14T22:13:20.123457Z"
+        );
+        assert_eq!(
+            timestamp_to_rfc3339("1.700000000123457E9").unwrap(),
+            "2023-11-14T22:13:20.123457Z"
+        );
+        assert_eq!(
+            timestamp_to_rfc3339("-1").unwrap(),
+            "1969-12-31T23:59:59.999999Z"
+        );
+        assert_eq!(
+            timestamp_to_rfc3339("-0.5").unwrap(),
+            "1969-12-31T23:59:59.500000Z"
+        );
+        assert_eq!(
+            timestamp_to_rfc3339("253402300799999999").unwrap(),
+            "9999-12-31T23:59:59.999999Z"
+        );
+    }
 
     #[test]
     fn renders_nested_and_repeated_type_names() {
@@ -246,9 +320,9 @@ mod tests {
                 mode: None,
                 description: None,
                 fields: vec![],
-                default_value_expression: None,
+                ..Default::default()
             }],
-            default_value_expression: None,
+            ..Default::default()
         };
         assert_eq!(field.display_type(), "ARRAY<STRUCT<amount NUMERIC>>");
     }

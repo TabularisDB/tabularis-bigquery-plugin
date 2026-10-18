@@ -1,0 +1,61 @@
+[
+  {
+    "routineReference": {"projectId": "my-project-1", "datasetId": "sales", "routineId": "net_amount"},
+    "routineType": "SCALAR_FUNCTION",
+    "language": "SQL",
+    "arguments": [
+      {"name": "amount", "dataType": {"typeKind": "NUMERIC"}},
+      {"name": "rate", "dataType": {"typeKind": "FLOAT64"}}
+    ],
+    "returnType": {"typeKind": "NUMERIC"},
+    "definitionBody": "amount * (1 - rate)"
+  },
+  {
+    "routineReference": {"projectId": "my-project-1", "datasetId": "sales", "routineId": "upper_js"},
+    "routineType": "SCALAR_FUNCTION",
+    "language": "JAVASCRIPT",
+    "arguments": [{"name": "s", "dataType": {"typeKind": "STRING"}}],
+    "returnType": {"typeKind": "STRING"},
+    "definitionBody": "return s.toUpperCase();"
+  },
+  {
+    "routineReference": {"projectId": "my-project-1", "datasetId": "sales", "routineId": "inferred"},
+    "routineType": "SCALAR_FUNCTION",
+    "language": "SQL",
+    "arguments": [{"name": "x", "argumentKind": "ANY_TYPE"}],
+    "definitionBody": "x"
+  },
+  {
+    "routineReference": {"projectId": "my-project-1", "datasetId": "sales", "routineId": "orders_since"},
+    "routineType": "TABLE_VALUED_FUNCTION",
+    "language": "SQL",
+    "arguments": [{"name": "since", "dataType": {"typeKind": "TIMESTAMP"}}],
+    "returnTableType": {"columns": [
+      {"name": "order_id", "type": {"typeKind": "INT64"}},
+      {"name": "items", "type": {"typeKind": "ARRAY", "arrayElementType": {"typeKind": "STRUCT", "structType": {"fields": [{"name": "sku", "type": {"typeKind": "STRING"}}]}}}}
+    ]},
+    "definitionBody": "SELECT order_id, items FROM `my-project-1`.`sales`.`orders` WHERE placed_at >= since"
+  },
+  {
+    "routineReference": {"projectId": "my-project-1", "datasetId": "sales", "routineId": "close_orders"},
+    "routineType": "PROCEDURE",
+    "language": "SQL",
+    "arguments": [
+      {"name": "before", "mode": "IN", "dataType": {"typeKind": "DATE"}},
+      {"name": "closed", "mode": "OUT", "dataType": {"typeKind": "INT64"}},
+      {"name": "note", "mode": "INOUT", "dataType": {"typeKind": "STRING"}}
+    ],
+    "definitionBody": "BEGIN\n  UPDATE `my-project-1`.`sales`.`orders` SET status = 'closed' WHERE DATE(placed_at) < before;\n  SET closed = @@row_count;\nEND"
+  },
+  {
+    "routineReference": {"projectId": "my-project-1", "datasetId": "sales", "routineId": "weighted_avg"},
+    "routineType": "AGGREGATE_FUNCTION",
+    "language": "SQL",
+    "arguments": [
+      {"name": "v", "dataType": {"typeKind": "FLOAT64"}},
+      {"name": "w", "dataType": {"typeKind": "FLOAT64"}}
+    ],
+    "returnType": {"typeKind": "FLOAT64"},
+    "definitionBody": "SUM(v * w) / SUM(w)"
+  }
+]

@@ -36,6 +36,48 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo fmt --all -- --check
 
+  emulator:
+    name: BigQuery emulator integration
+    runs-on: ubuntu-latest
+    services:
+      bigquery:
+        image: ghcr.io/goccy/bigquery-emulator:latest
+        env:
+          BIGQUERY_EMULATOR_PROJECT: test
+          BIGQUERY_EMULATOR_DATASET: ds
+        ports:
+          - 9050:9050
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Wait for the emulator
+        run: |
+          for attempt in $(seq 1 30); do
+            curl -sf http://localhost:9050/bigquery/v2/projects/test/datasets && exit 0
+            sleep 2
+          done
+          exit 1
+      - run: cargo test --test emulator --test emulator_metadata
+        env:
+          BIGQUERY_EMULATOR_HOST: localhost:9050
+
+  explain:
+    name: EXPLAIN parser package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: explain/pnpm-lock.yaml
+      - run: pnpm --dir explain install --frozen-lockfile
+      - run: pnpm --dir explain typecheck
+      - run: pnpm --dir explain test
+
   validate-manifest:
     name: Validate .tabularium manifest
     runs-on: ubuntu-latest

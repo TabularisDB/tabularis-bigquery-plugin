@@ -1,0 +1,23 @@
+<svg viewBox="0 0 556 556" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title description">
+  <title id="title">Google BigQuery</title>
+  <desc id="description">White magnifying glass over a bar chart on a blue hexagon</desc>
+  <defs>
+    <clipPath id="hexagon">
+      <polygon points="30,278 152,60 404,60 526,278 404,496 152,496" stroke="#000" stroke-width="40" stroke-linejoin="round"/>
+      <path d="M8 278 140 40h276l132 238-132 238H140z"/>
+    </clipPath>
+    <clipPath id="lens">
+      <circle cx="275" cy="268" r="73"/>
+    </clipPath>
+  </defs>
+  <polygon points="30,278 152,60 404,60 526,278 404,496 152,496" fill="#4285f4" stroke="#4285f4" stroke-width="40" stroke-linejoin="round"/>
+  <path d="M342 201 600 459V600H460L208 336z" fill="#3367d6" opacity=".55" clip-path="url(#hexagon)"/>
+  <circle cx="275" cy="268" r="84" fill="#3b78e7"/>
+  <g fill="#fff" clip-path="url(#lens)">
+    <rect x="230" y="270" width="17" height="80"/>
+    <rect x="267" y="243" width="17" height="110"/>
+    <rect x="304" y="284" width="17" height="70"/>
+  </g>
+  <circle cx="275" cy="268" r="84" fill="none" stroke="#fff" stroke-width="23"/>
+  <path d="M342 335 381 374" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="24"/>
+</svg>

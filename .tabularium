@@ -1,13 +1,27 @@
 {
   "$schema": "https://registry.tabularis.dev/manifest.schema.json?kind=driver",
-  "name": "bigquery",
-  "version": "0.1.0",
-  "description": "Google BigQuery driver for Tabularis with GoogleSQL, datasets, views, routines, editable results and cost controls.",
+  "id": "bigquery",
+  "name": "BigQuery",
+  "version": "0.2.0",
+  "description": "Google BigQuery driver for Tabularis with multi-project browsing, cancellable paged queries, sessions and transactions, query plans, GoogleSQL, materialized views, routine management, typed row editing and cost controls.",
+  "category": "database",
+  "tags": ["driver", "bigquery", "google-cloud", "gcp", "sql", "googlesql", "analytics", "data-warehouse", "database-driver"],
   "kind": "driver",
   "engine": "bigquery",
+  "explain_parsers": [
+    {
+      "engine": "bigquery",
+      "format": "bigquery-job-json",
+      "label": "BigQuery job plan (JSON)",
+      "module": "explain/dist/index.iife.js"
+    }
+  ],
   "paradigms": ["relational", "columnar"],
   "license": "Apache-2.0",
+  "readme": "README.md",
+  "min_runtime_version": "0.29.0",
   "homepage": "https://github.com/TabularisDB/tabularis-bigquery-plugin",
+  "documentation_url": "https://github.com/TabularisDB/tabularis-bigquery-plugin#readme",
   "support": {
     "issues_url": "https://github.com/TabularisDB/tabularis-bigquery-plugin/issues"
   },
@@ -15,7 +29,7 @@
   "default_username": "",
   "executable": "bigquery-plugin",
   "color": "#4285F4",
-  "icon": "cloud",
+  "icon": "https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/bigquery-icon.svg",
   "connection_fields": {
     "host": {"hidden": true},
     "port": {"hidden": true},
@@ -23,7 +37,7 @@
     "password": {"hidden": true},
     "database": {
       "label": "GCP Project ID",
-      "placeholder": "billing-project"
+      "placeholder": "my-data-project"
     }
   },
   "ui_extensions": [
@@ -39,14 +53,35 @@
     "views": true,
     "materialized_views": true,
     "routines": true,
-    "routine_management": false,
+    "routine_management": true,
     "triggers": false,
     "file_based": false,
     "folder_based": false,
     "no_connection_required": false,
     "connection_string": false,
     "identifier_quote": "`",
-    "sql_dialect": "generic",
+    "sql_dialect": "mysql",
+    "sql_syntax": {
+      "extends": "generic",
+      "quotes": [
+        {"open": "'", "kind": "string", "escape": "backslash"},
+        {"open": "\"", "kind": "string", "escape": "backslash"},
+        {"open": "`", "kind": "identifier", "escape": "backslash"}
+      ],
+      "triple_quoted_strings": true,
+      "string_prefixes": ["r", "b", "rb", "br"],
+      "hash_comments": true,
+      "nested_block_comments": false,
+      "line_comment_requires_space": false,
+      "script_blocks": true,
+      "dollar_quoting": false,
+      "string_escape": "backslash",
+      "like_escape": false,
+      "boolean_literals": "keywords",
+      "formatter": "bigquery",
+      "keywords": ["QUALIFY", "PIVOT", "UNPIVOT", "TABLESAMPLE SYSTEM", "UNNEST", "WITH OFFSET", "EXCEPT", "REPLACE", "WINDOW", "OVER", "PARTITION BY", "CLUSTER BY", "OPTIONS", "FOR SYSTEM_TIME AS OF", "IGNORE NULLS", "RESPECT NULLS", "UNION ALL", "UNION DISTINCT", "INTERSECT DISTINCT", "EXCEPT DISTINCT", "MERGE", "WHEN MATCHED", "WHEN NOT MATCHED", "WHEN NOT MATCHED BY SOURCE", "CREATE OR REPLACE TABLE", "CREATE TEMP TABLE", "CREATE TEMP FUNCTION", "CREATE OR REPLACE PROCEDURE", "CREATE SCHEMA", "RETURNS", "LANGUAGE js", "EXPORT DATA", "LOAD DATA", "ASSERT", "DECLARE", "BEGIN", "BEGIN TRANSACTION", "COMMIT TRANSACTION", "ROLLBACK TRANSACTION", "EXCEPTION WHEN ERROR THEN", "ELSEIF", "END IF", "LOOP", "END LOOP", "WHILE", "END WHILE", "REPEAT", "UNTIL", "END REPEAT", "FOR", "DO", "END FOR", "END CASE", "LEAVE", "BREAK", "CONTINUE", "ITERATE", "RETURN", "CALL", "EXECUTE IMMEDIATE", "RAISE USING MESSAGE", "INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC", "BOOL", "STRING", "BYTES", "DATE", "DATETIME", "TIME", "TIMESTAMP", "INTERVAL", "GEOGRAPHY", "JSON", "STRUCT", "ARRAY", "RANGE"],
+      "functions": ["SAFE_CAST", "SAFE.", "SAFE_DIVIDE", "IF", "IFNULL", "COALESCE", "NULLIF", "COUNTIF", "ARRAY_AGG", "STRING_AGG", "LOGICAL_AND", "LOGICAL_OR", "ANY_VALUE", "APPROX_COUNT_DISTINCT", "APPROX_QUANTILES", "APPROX_TOP_COUNT", "APPROX_TOP_SUM", "ROW_NUMBER", "RANK", "DENSE_RANK", "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTILE", "PERCENTILE_CONT", "ARRAY_LENGTH", "ARRAY_CONCAT", "ARRAY_TO_STRING", "GENERATE_ARRAY", "GENERATE_DATE_ARRAY", "SPLIT", "FORMAT", "STARTS_WITH", "ENDS_WITH", "CONTAINS_SUBSTR", "REGEXP_CONTAINS", "REGEXP_EXTRACT", "REGEXP_EXTRACT_ALL", "REGEXP_REPLACE", "REGEXP_INSTR", "FARM_FINGERPRINT", "GENERATE_UUID", "JSON_VALUE", "JSON_QUERY", "JSON_VALUE_ARRAY", "JSON_QUERY_ARRAY", "JSON_EXTRACT", "JSON_EXTRACT_SCALAR", "PARSE_JSON", "TO_JSON", "TO_JSON_STRING", "CURRENT_DATE", "CURRENT_DATETIME", "CURRENT_TIMESTAMP", "EXTRACT", "DATE_TRUNC", "DATE_ADD", "DATE_SUB", "DATE_DIFF", "DATETIME_TRUNC", "DATETIME_DIFF", "TIMESTAMP_TRUNC", "TIMESTAMP_ADD", "TIMESTAMP_SUB", "TIMESTAMP_DIFF", "FORMAT_DATE", "FORMAT_TIMESTAMP", "PARSE_DATE", "PARSE_TIMESTAMP", "UNIX_SECONDS", "UNIX_MILLIS", "TIMESTAMP_SECONDS", "TIMESTAMP_MILLIS", "LAST_DAY", "ST_GEOGPOINT", "ST_GEOGFROMTEXT", "ST_ASTEXT", "ST_DISTANCE", "ST_DWITHIN", "ST_CONTAINS", "ST_INTERSECTS", "ST_AREA", "ST_LENGTH", "ST_BUFFER"]
+    },
     "alter_primary_key": true,
     "alter_column": true,
     "create_foreign_keys": true,
@@ -56,20 +91,33 @@
     "readonly": false,
     "serial_type": "",
     "auto_increment_keyword": "",
-    "inline_pk": false
+    "inline_pk": false,
+    "column_comments": true,
+    "drop_table_sql": true
   },
   "type_mappings": {
     "INTEGER": "INT64",
+    "BIGINT": "INT64",
+    "SERIAL": "INT64",
     "REAL": "FLOAT64",
+    "DOUBLE": "FLOAT64",
+    "DECIMAL": "NUMERIC",
     "BOOLEAN": "BOOL",
+    "TEXT": "STRING",
+    "VARCHAR": "STRING",
+    "UUID": "STRING",
+    "BLOB": "BYTES",
+    "JSON": "JSON",
+    "DATE": "DATE",
+    "TIME": "TIME",
     "DATETIME": "DATETIME",
-    "TEXT": "STRING"
+    "TIMESTAMP": "TIMESTAMP"
   },
   "data_types": [
     {"name": "INT64", "category": "numeric", "requires_length": false, "requires_precision": false},
     {"name": "FLOAT64", "category": "numeric", "requires_length": false, "requires_precision": false},
-    {"name": "NUMERIC", "category": "numeric", "requires_length": false, "requires_precision": true},
-    {"name": "BIGNUMERIC", "category": "numeric", "requires_length": false, "requires_precision": true},
+    {"name": "NUMERIC", "category": "numeric", "requires_length": false, "requires_precision": false},
+    {"name": "BIGNUMERIC", "category": "numeric", "requires_length": false, "requires_precision": false},
     {"name": "STRING", "category": "string", "requires_length": false, "requires_precision": false},
     {"name": "BYTES", "category": "binary", "requires_length": false, "requires_precision": false},
     {"name": "BOOL", "category": "other", "requires_length": false, "requires_precision": false},
