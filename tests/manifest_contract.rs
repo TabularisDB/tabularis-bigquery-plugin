@@ -40,6 +40,8 @@ fn manifest_declares_bigquery_feature_coverage() {
     assert_eq!(capabilities["routine_management"], true);
     assert_eq!(capabilities["materialized_views"], true);
     assert_eq!(capabilities["alter_primary_key"], true);
+    assert_eq!(capabilities["column_comments"], true);
+    assert_eq!(manifest["min_runtime_version"], "0.29.0");
     for (generic, native) in [
         ("JSON", "JSON"),
         ("BLOB", "BYTES"),

@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## 0.2.0
 
+Requires Tabularis 0.29.0 or later (`min_runtime_version`): it relies on plugin connection fields and secrets, the DDL connection context and the bundled Visual EXPLAIN parser.
+
 ### Query runtime
 
 - Handle JSON-RPC requests concurrently with a single ordered writer, and cancel the running BigQuery job when Tabularis sends a `cancel` notification.
@@ -14,7 +16,7 @@ All notable changes to this project are documented in this file.
 - Serve plain `SELECT * FROM table` table browsing through the free `tabledata.list` API.
 - Support Tabularis editor sessions with BigQuery sessions, transaction tracking and `release_session`; run stateful batches in a short-lived session.
 - Return the last result set and summed DML row count of multi-statement scripts.
-- Return Visual EXPLAIN as a raw `bigquery-job-json` payload with a bundled parser: dry-run bytes and on-demand cost estimates, and executed stage plans for EXPLAIN ANALYZE. Requires Tabularis 0.23.0.
+- Return Visual EXPLAIN as a raw `bigquery-job-json` payload with a bundled parser: dry-run bytes and on-demand cost estimates, and executed stage plans for EXPLAIN ANALYZE.
 - Map common BigQuery error reasons to messages with hints.
 - Run metadata queries, DDL, row edits and routine statements through the same job path as editor queries, with typed named query parameters, so they get request IDs, retries, job timeouts, labels, error hints and cancellation.
 - Clear the metadata cache after any editor statement other than a plain query, so DDL and DML run from a query tab show up at once.
@@ -32,7 +34,9 @@ All notable changes to this project are documented in this file.
 
 ### DDL and row editing
 
-- Quote every part of generated identifiers and fully qualify objects as `` `project`.`dataset`.`object` ``.
+- Quote every part of generated identifiers and fully qualify objects as `` `project`.`dataset`.`object` ``. Table, column, foreign-key and routine template builders use the browsed project from the connection parameters the host sends with every DDL request, and fall back to dataset-qualified names on older hosts.
+- Implement `get_drop_table_sql`, so the explorer drops tables, external tables, snapshots, views and materialized views with the matching statement.
+- Declare `column_comments`: column descriptions from the column editor are written with `OPTIONS(description = ...)` on create and add, and changed or cleared with `ALTER COLUMN ... SET OPTIONS(description = ...)`.
 - Drop views and materialized views with the matching statement, and reject row edits and column changes on snapshots and external tables.
 - Generate only DDL that BigQuery accepts: no `NOT NULL` on added columns, no `SET NOT NULL`, type changes limited to supported widenings, column descriptions through `SET OPTIONS`, primary keys added and dropped as `NOT ENFORCED`, and optional partitioning, clustering and description on new tables.
 - Edit rows with typed query parameters; support tables without a primary key by matching comparable columns inside a transaction that rolls back when more than one row matches; report real affected-row counts and explain streaming-buffer errors.
@@ -51,6 +55,8 @@ All notable changes to this project are documented in this file.
 
 ### Packaging and tests
 
+- Fix the GCP Project ID placeholder, which suggested the billing project.
+- Let `pnpm install --frozen-lockfile` run the esbuild install script with pnpm 10 and later.
 - Complete the manifest type mappings, stop requiring precision for NUMERIC and BIGNUMERIC, add registry metadata and declare the Visual EXPLAIN parser.
 - Add mocked HTTP, host-shape conformance and BigQuery emulator integration tests for the query runtime and for metadata, DDL and row editing.
 

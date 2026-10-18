@@ -6,6 +6,8 @@
 
 A native Google BigQuery driver for [Tabularis](https://github.com/TabularisDB/tabularis). The plugin is a standalone Rust executable that uses the BigQuery REST API v2 and communicates with Tabularis through newline-delimited JSON-RPC 2.0 over standard input and output.
 
+Requires Tabularis 0.29.0 or later.
+
 ## Features
 
 - Application Default Credentials (including `impersonated_service_account` ADC files), service account JSON, refreshable OAuth authorized user credentials and direct OAuth access token authentication
@@ -27,7 +29,8 @@ A native Google BigQuery driver for [Tabularis](https://github.com/TabularisDB/t
 - Routine management for SQL, JavaScript and Python functions, table functions, aggregate functions and procedures: browse, inspect parameters, run, create, edit and drop
 - Manual materialized view refresh
 - Inline insert, update and delete with typed query parameters, including tables without a primary key
-- Table, column, view and unenforced key DDL generation that only emits changes BigQuery accepts
+- Table, column, view and unenforced key DDL generation that only emits changes BigQuery accepts, with column descriptions
+- Dropping tables, external tables, snapshots, views and materialized views from the explorer with the matching `DROP` statement
 - BLOB preview and export for `BYTES` columns
 - Batch metadata methods for ER diagrams and AI schema context, fetched with bounded concurrency
 - Linux, macOS and Windows release packaging
@@ -130,7 +133,7 @@ Use `bigquery-plugin.exe` on Windows.
 
 ## Build and test
 
-Rust stable, Node.js 20 and pnpm 9 are required. The UI extension is authored in React and TypeScript under `ui/src`; Vite produces the IIFE bundle loaded by Tabularis. The Visual EXPLAIN parser lives under `explain/` and is built with tsup.
+Rust stable, Node.js 20 and pnpm 9 or later are required. Each package directory is its own pnpm workspace whose `pnpm-workspace.yaml` allows the esbuild install script, so frozen installs also work with pnpm 10 and later. The UI extension is authored in React and TypeScript under `ui/src`; Vite produces the IIFE bundle loaded by Tabularis. The Visual EXPLAIN parser lives under `explain/` and is built with tsup.
 
 ```bash
 pnpm --dir ui install --frozen-lockfile
@@ -181,7 +184,7 @@ The plugin writes protocol responses only to stdout. Diagnostics are written to 
 - A query of the exact form `SELECT * FROM table [LIMIT n [OFFSET m]]` on a native table, which is what a Tabularis table tab sends, is served by `tabledata.list` without a query job and without scanning cost. Views, external tables, filters, ordering and any other SQL run as normal jobs.
 - TIMESTAMP values are returned with exact microseconds.
 - When Tabularis pins an editor tab to a session, the plugin creates a BigQuery session for it and runs every statement of that tab inside it. `BEGIN`, `COMMIT` and `ROLLBACK` are tracked for the transaction indicator. Closing the tab aborts the session. A batch without a session that contains `DECLARE`, `SET`, temporary tables or transaction statements runs in a short-lived session. BigQuery has no savepoints; savepoint statements are answered with an error without being sent.
-- Visual EXPLAIN runs a dry run and shows bytes processed and an estimated on-demand cost (US$6.25 per TiB list price, clearly labelled as an estimate) plus the referenced tables. EXPLAIN ANALYZE executes the statement, including DML, and shows each query stage with slot time, wall time, records read and written, shuffle bytes and steps. The plan is parsed by the bundled `explain/dist/index.iife.js` parser, which requires Tabularis 0.23.0 or newer.
+- Visual EXPLAIN runs a dry run and shows bytes processed and an estimated on-demand cost (US$6.25 per TiB list price, clearly labelled as an estimate) plus the referenced tables. EXPLAIN ANALYZE executes the statement, including DML, and shows each query stage with slot time, wall time, records read and written, shuffle bytes and steps. The plan is parsed by the bundled `explain/dist/index.iife.js` parser.
 - Table, view and materialized view definitions come from `INFORMATION_SCHEMA.TABLES.ddl`, a small billed query run in the dataset location, so options, partitioning and clustering are preserved. When that query is not available the DDL is rebuilt from table metadata.
 - Saving a view keeps its description, friendly name and labels. Legacy SQL views can be read but not saved from the view editor.
 - Routines are listed as functions and procedures. Table functions, aggregate functions, JavaScript and Python UDFs and remote functions are rebuilt as complete `CREATE OR REPLACE` scripts for editing. Running a function previews `SELECT fn(...)` or `SELECT * FROM table_fn(...)`; procedures use `CALL`, with `OUT` and `INOUT` arguments returned through script variables.
@@ -189,6 +192,8 @@ The plugin writes protocol responses only to stdout. Diagnostics are written to 
 - BigQuery primary and foreign keys are informational and emitted as `NOT ENFORCED`. Foreign keys support no `ON DELETE` / `ON UPDATE` actions.
 - Column changes follow BigQuery limits: new columns cannot be `NOT NULL`, existing columns can drop `NOT NULL` but never gain it, and `SET DATA TYPE` only widens types (`INT64` to `NUMERIC`, `BIGNUMERIC` or `FLOAT64`; `NUMERIC` to `BIGNUMERIC` or `FLOAT64`; larger `STRING`, `BYTES` and decimal parameters). Other changes are rejected with an explanation instead of failing at run time.
 - Snapshots and external tables are read-only for row editing and column changes.
+- Column descriptions entered in the column editor become `OPTIONS(description = ...)` on new tables and columns, and `ALTER COLUMN ... SET OPTIONS(description = ...)` on existing columns; clearing the description sets it to `NULL`.
+- Dropping an object from the explorer looks up its type and runs `DROP TABLE`, `DROP EXTERNAL TABLE`, `DROP SNAPSHOT TABLE`, `DROP VIEW` or `DROP MATERIALIZED VIEW` on the fully qualified name.
 - Row edits use typed query parameters. On tables without a primary key, rows are matched on every comparable column (floating point, JSON, geography, arrays, structs, ranges and bytes are skipped), and the change runs in a transaction that rolls back if more than one row would change.
 - Rows still in the streaming buffer cannot be updated or deleted; the plugin reports this with a clear message.
 - General-purpose indexes are not available in BigQuery. Search and vector indexes use `CREATE SEARCH INDEX` / `CREATE VECTOR INDEX` in a query tab; the index editor only drops the informational primary key.
