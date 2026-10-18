@@ -16,6 +16,7 @@ Requires Tabularis 0.29.0 or later.
 - Multi-project browsing: every project the credential can see, plus extra projects such as `bigquery-public-data`, with an optional separate billing project for jobs
 - Dataset, table, external table, snapshot, clone, view and materialized view browsing with descriptions
 - Nested `STRUCT`, repeated `ARRAY`, `JSON`, `BYTES`, temporal, numeric and geography value conversion
+- GoogleSQL editor support declared through `sql_syntax`: script splitting with `BEGIN … END` blocks, triple-quoted and raw strings, `#` comments, BigQuery formatting and autocomplete keywords
 - GoogleSQL query execution with idempotent, labelled jobs, server-side job timeouts and cancellation
 - Exact result pagination that reuses the finished job for later pages instead of running the SQL again
 - Free table browsing through `tabledata.list` for plain `SELECT * FROM table` queries

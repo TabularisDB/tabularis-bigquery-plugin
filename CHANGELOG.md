@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## 0.2.0
 
-Requires Tabularis 0.29.0 or later (`min_runtime_version`): it relies on plugin connection fields and secrets, the DDL connection context and the bundled Visual EXPLAIN parser.
+Requires Tabularis 0.29.0 or later (`min_runtime_version`): it relies on plugin connection fields and secrets, the DDL connection context, the declarative `sql_syntax` capability and the bundled Visual EXPLAIN parser.
 
 ### Query runtime
 
@@ -40,6 +40,7 @@ Requires Tabularis 0.29.0 or later (`min_runtime_version`): it relies on plugin 
 - Drop views and materialized views with the matching statement, and reject row edits and column changes on snapshots and external tables.
 - Generate only DDL that BigQuery accepts: no `NOT NULL` on added columns, no `SET NOT NULL`, type changes limited to supported widenings, column descriptions through `SET OPTIONS`, primary keys added and dropped as `NOT ENFORCED`, and optional partitioning, clustering and description on new tables.
 - Edit rows with typed query parameters; support tables without a primary key by matching comparable columns inside a transaction that rolls back when more than one row matches; report real affected-row counts and explain streaming-buffer errors.
+- Declare the GoogleSQL syntax (backtick identifiers, triple-quoted and raw strings, `#` comments, procedural `BEGIN … END` blocks, backslash literals, keywords and functions) through `sql_syntax`, so Tabularis splits scripts, formats SQL and builds filters the GoogleSQL way. Older hosts fall back to the `mysql` dialect.
 - Write valid GoogleSQL literals for strings with newlines and control characters, NUMERIC, BIGNUMERIC, GEOGRAPHY, INTERVAL, RANGE, JSON, BYTES, ARRAY and STRUCT values.
 
 ### Connection and authentication
