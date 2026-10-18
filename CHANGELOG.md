@@ -35,7 +35,7 @@ Requires Tabularis 0.29.0 or later (`min_runtime_version`): it relies on plugin 
 ### DDL and row editing
 
 - Quote every part of generated identifiers and fully qualify objects as `` `project`.`dataset`.`object` ``. Table, column, foreign-key and routine template builders use the browsed project from the connection parameters the host sends with every DDL request, and fall back to dataset-qualified names on older hosts.
-- Implement `get_drop_table_sql`, so the explorer drops tables, external tables, snapshots, views and materialized views with the matching statement.
+- Declare `drop_table_sql` and implement `get_drop_table_sql`, so the explorer drops tables, external tables, snapshots, views and materialized views with the matching statement.
 - Declare `column_comments`: column descriptions from the column editor are written with `OPTIONS(description = ...)` on create and add, and changed or cleared with `ALTER COLUMN ... SET OPTIONS(description = ...)`.
 - Drop views and materialized views with the matching statement, and reject row edits and column changes on snapshots and external tables.
 - Generate only DDL that BigQuery accepts: no `NOT NULL` on added columns, no `SET NOT NULL`, type changes limited to supported widenings, column descriptions through `SET OPTIONS`, primary keys added and dropped as `NOT ENFORCED`, and optional partitioning, clustering and description on new tables.

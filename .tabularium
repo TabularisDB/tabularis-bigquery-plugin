@@ -90,7 +90,8 @@
     "serial_type": "",
     "auto_increment_keyword": "",
     "inline_pk": false,
-    "column_comments": true
+    "column_comments": true,
+    "drop_table_sql": true
   },
   "type_mappings": {
     "INTEGER": "INT64",
