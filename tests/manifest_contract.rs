@@ -32,3 +32,27 @@ fn manifest_declares_safe_bigquery_defaults() {
         "GCP Project ID"
     );
 }
+
+#[test]
+fn manifest_declares_bigquery_feature_coverage() {
+    let manifest: Value = serde_json::from_str(include_str!("../.tabularium")).unwrap();
+    let capabilities = &manifest["capabilities"];
+    assert_eq!(capabilities["routine_management"], true);
+    assert_eq!(capabilities["materialized_views"], true);
+    assert_eq!(capabilities["alter_primary_key"], true);
+    for (generic, native) in [
+        ("JSON", "JSON"),
+        ("BLOB", "BYTES"),
+        ("UUID", "STRING"),
+        ("SERIAL", "INT64"),
+        ("DECIMAL", "NUMERIC"),
+        ("TIMESTAMP", "TIMESTAMP"),
+    ] {
+        assert_eq!(manifest["type_mappings"][generic], native, "{generic}");
+    }
+    for data_type in manifest["data_types"].as_array().unwrap() {
+        if matches!(data_type["name"].as_str(), Some("NUMERIC" | "BIGNUMERIC")) {
+            assert_eq!(data_type["requires_precision"], false);
+        }
+    }
+}
