@@ -1,7 +1,15 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/TabularisDB/tabularis/main/packages/web-ui/public/logo-sm.png" width="120" height="120" alt="Tabularis logo" />
-  <img src="https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/assets/plus.svg" width="40" height="40" alt="plus" />
-  <img src="https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/bigquery-icon.svg" width="120" height="120" alt="Google BigQuery logo" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TabularisDB/tabularis/main/.github/assets/banner-dark.png" />
+    <img src="https://raw.githubusercontent.com/TabularisDB/tabularis/main/.github/assets/banner-light.png" alt="tabularis — the database client your AI agent can actually use" width="600" />
+  </picture>
+
+  <br/>
+
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/assets/bigquery-banner-dark.png" />
+    <img src="https://raw.githubusercontent.com/TabularisDB/tabularis-bigquery-plugin/main/assets/bigquery-banner-light.png" alt="Native BigQuery support" width="600" />
+  </picture>
 </div>
 
 # tabularis-bigquery-plugin
