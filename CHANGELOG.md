@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.1] - 2026-10-25
+
+### Fixed
+
+- Update rustls-webpki, webpki-roots and Tokio to resolve the certificate trust advisories and I/O-safety warning; keep dependency resolution fixed by locked release builds.
+
+
 ## 0.2.0
 
 Requires Tabularis 0.29.0 or later (`min_runtime_version`): it relies on plugin connection fields and secrets, the DDL connection context, the declarative `sql_syntax` capability and the bundled Visual EXPLAIN parser.
